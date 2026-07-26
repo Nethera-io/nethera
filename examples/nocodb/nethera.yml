@@ -1,0 +1,14 @@
+appName: nocodb
+services:
+  web:
+    image: nocodb/nocodb:latest
+    volumes:
+      - nocodb-data:/usr/app/data
+    nethera:
+      public: 8080     # exposes container port 8080 as the public HTTPS endpoint
+      auth: login      # protects first admin setup behind Nethera login
+      secrets:
+        - NC_AUTH_JWT_SECRET
+
+volumes:
+  nocodb-data:

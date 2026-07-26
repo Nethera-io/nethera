@@ -1,0 +1,18 @@
+appName: jupyter
+services:
+  notebook:
+    image: quay.io/jupyter/base-notebook:latest
+    command: start-notebook.py --IdentityProvider.token=''
+    volumes:
+      - jupyter-work:/home/jovyan/work
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    nethera:
+      public: 8888          # exposes container port 8888 as a public HTTPS endpoint
+      auth: login           # gates that endpoint behind Nethera login instead of Jupyter's own token
+
+volumes:
+  jupyter-work:

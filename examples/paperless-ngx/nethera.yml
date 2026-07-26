@@ -1,0 +1,48 @@
+appName: paperless
+services:
+  web:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    environment:
+      PAPERLESS_REDIS: redis://redis:6379
+      PAPERLESS_DBHOST: db
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_URL: ${NETHERA_PUBLIC_URL}
+    volumes:
+      - paperless-data:/usr/src/paperless/data
+      - paperless-media:/usr/src/paperless/media
+      - paperless-export:/usr/src/paperless/export
+      - /mnt/nethera/paperless/consume:/usr/src/paperless/consume
+    depends_on:
+      - db
+      - redis
+    nethera:
+      public: 8000          # exposes container port 8000 (Paperless's web UI) at the public HTTPS URL
+      auth: login           # requires Nethera login before Paperless-ngx loads
+      secrets:
+        - PAPERLESS_SECRET_KEY
+        - PAPERLESS_DBPASS
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: ${PAPERLESS_DBPASS}
+    volumes:
+      - paperless-db:/var/lib/postgresql/data
+    nethera:
+      secrets:
+        - PAPERLESS_DBPASS
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - paperless-redis:/data
+
+volumes:
+  paperless-data:
+  paperless-media:
+  paperless-export:
+  paperless-db:
+  paperless-redis:

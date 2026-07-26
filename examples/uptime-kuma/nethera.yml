@@ -1,0 +1,11 @@
+appName: uptime-kuma
+services:
+  web:
+    image: louislam/uptime-kuma:2
+    volumes:
+      - uptime-kuma-data:/app/data
+    nethera:
+      public: 3001         # exposes container port 3001 (Kuma's web UI) over a public HTTPS endpoint
+      auth: login           # protects first admin setup behind Nethera login
+volumes:
+  uptime-kuma-data:

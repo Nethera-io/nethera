@@ -1,0 +1,25 @@
+appName: ollama
+services:
+  ollama:
+    image: ollama/ollama:0.31.2
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    nethera:
+      public: 11434       # exposes Ollama's API port over HTTPS
+      auth: token          # requires a Nethera endpoint token on every request
+      postDeploy:
+        - |
+          until ollama list >/dev/null 2>&1; do
+            sleep 2
+          done
+          ollama pull llama3.2   # runs after deploy, pulls the model into the volume
+
+volumes:
+  ollama:

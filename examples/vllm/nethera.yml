@@ -1,0 +1,21 @@
+appName: vllm
+services:
+  api:
+    image: vllm/vllm-openai:latest
+    command: ["--model", "Qwen/Qwen3-0.6B"]
+    ipc: host
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]   # requires a GPU-capable machine and the NVIDIA Container Toolkit
+    nethera:
+      public: 8000                  # exposes container port 8000 as a public HTTPS endpoint
+      auth: token                   # requests must carry a Nethera endpoint token
+      secrets:
+        - HF_TOKEN                  # injected as an env var, used for gated/private HF models
+
+volumes:
+  hf-cache:

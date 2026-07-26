@@ -1,0 +1,35 @@
+appName: docmost
+services:
+  docmost:
+    image: docmost/docmost:latest
+    environment:
+      APP_URL: ${NETHERA_PUBLIC_URL}
+      DATABASE_URL: postgresql://docmost:docmost@db:5432/docmost
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - docmost-data:/app/data/storage
+    depends_on:
+      - db
+      - redis
+    nethera:
+      public: 3000        # exposes container port 3000 on a public HTTPS endpoint
+      auth: login         # protects first admin setup behind Nethera login
+      secrets:
+        - APP_SECRET      # injected at deploy time from Nethera secrets, not stored in this file
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: docmost
+      POSTGRES_USER: docmost
+      POSTGRES_PASSWORD: docmost
+    volumes:
+      - docmost-db:/var/lib/postgresql
+  redis:
+    image: redis:8
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - docmost-redis:/data
+volumes:
+  docmost-data:
+  docmost-db:
+  docmost-redis:

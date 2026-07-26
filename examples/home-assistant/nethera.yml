@@ -1,0 +1,18 @@
+appName: home-assistant
+services:
+  web:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - home-assistant-config:/config
+    network_mode: host          # required for HA's local network discovery (mDNS, HomeKit, etc.)
+    nethera:
+      public: 8123               # exposes port 8123 as a public HTTPS endpoint
+      auth: login                # protects first admin setup behind Nethera login
+      preferLan: true            # redirects same-network traffic to the local address when possible
+      files:
+        configuration.yaml:
+          source: ./configuration.yaml
+          target: /config/configuration.yaml
+          mode: "0644"
+volumes:
+  home-assistant-config:

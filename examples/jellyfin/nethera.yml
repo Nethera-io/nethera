@@ -1,0 +1,16 @@
+appName: jellyfin
+services:
+  web:
+    image: jellyfin/jellyfin:latest
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+      - /mnt/nethera/jellyfin/media:/media
+    nethera:
+      public: 8096   # exposes Jellyfin's web port over a public HTTPS endpoint
+      auth: login    # protects first admin setup behind Nethera login
+      preferLan: true # redirects same-network traffic to the local address when possible
+
+volumes:
+  jellyfin-config:
+  jellyfin-cache:

@@ -1,0 +1,36 @@
+appName: nextcloud
+services:
+  web:
+    image: nextcloud:apache
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      NEXTCLOUD_TRUSTED_DOMAINS: ${NETHERA_PUBLIC_HOST} ${NETHERA_LAN_HOST}
+    volumes:
+      - nextcloud-data:/var/www/html
+    depends_on:
+      - db
+    nethera:
+      public: 80      # exposes container port 80 and issues a public HTTPS endpoint for it
+      auth: login     # protects first admin setup behind Nethera login
+      preferLan: true # redirects same-network traffic to the local address when possible
+      secrets:
+        - MYSQL_PASSWORD
+
+  db:
+    image: mariadb:11
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    environment:
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+    volumes:
+      - nextcloud-db:/var/lib/mysql
+    nethera:
+      secrets:
+        - MYSQL_PASSWORD
+        - MYSQL_ROOT_PASSWORD
+
+volumes:
+  nextcloud-data:
+  nextcloud-db:

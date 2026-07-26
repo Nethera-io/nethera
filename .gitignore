@@ -1,0 +1,18 @@
+# Node / TypeScript backend
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/dev.db
+backend/dev.db-journal
+backend/prisma/*.db
+backend/prisma/*.db-journal
+
+# Go / agent / cli
+agent/bin/
+cli/bin/
+cli/cli
+*.test
+
+# OS/editor junk
+.DS_Store
+.vscode/

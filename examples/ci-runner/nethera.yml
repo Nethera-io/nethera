@@ -1,0 +1,16 @@
+appName: gitlab-runner
+services:
+  runner:
+    image: gitlab/gitlab-runner:latest
+    volumes:
+      - gitlab-runner-config:/etc/gitlab-runner   # persists config.toml across restarts/redeploys
+      - /var/run/docker.sock:/var/run/docker.sock # lets the runner spin up docker executor jobs
+    nethera:
+      postDeploy:
+        # runs the registration command against your GitLab instance using the secrets below
+        - gitlab-runner register --non-interactive --url "$GITLAB_URL" --token "$GITLAB_RUNNER_TOKEN" --executor docker --docker-image alpine:latest
+      secrets:
+        - GITLAB_URL          # your GitLab instance URL, e.g. https://gitlab.com
+        - GITLAB_RUNNER_TOKEN # runner authentication token issued when you create the runner in GitLab
+volumes:
+  gitlab-runner-config:

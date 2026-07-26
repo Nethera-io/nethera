@@ -1,0 +1,39 @@
+appName: plausible
+services:
+  plausible:
+    image: ghcr.io/plausible/community-edition:v3.2.0
+    command: sh -c "/entrypoint.sh db createdb && /entrypoint.sh db migrate && /entrypoint.sh run"
+    environment:
+      BASE_URL: ${NETHERA_PUBLIC_URL}
+      DATABASE_URL: postgres://postgres:postgres@db:5432/plausible
+      CLICKHOUSE_DATABASE_URL: http://clickhouse:8123/plausible
+    volumes:
+      - plausible-data:/var/lib/plausible
+    depends_on:
+      - db
+      - clickhouse
+    nethera:
+      public: 8000     # exposes this service's port 8000 over HTTPS at a Nethera-issued public URL
+      auth: login      # protects first admin setup behind Nethera login
+      secrets:
+        - SECRET_KEY_BASE
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: plausible
+    volumes:
+      - plausible-db:/var/lib/postgresql/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12-alpine
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    volumes:
+      - plausible-clickhouse:/var/lib/clickhouse
+
+volumes:
+  plausible-data:
+  plausible-db:
+  plausible-clickhouse:

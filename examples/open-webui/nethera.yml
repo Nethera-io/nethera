@@ -1,0 +1,33 @@
+appName: open-webui
+
+services:
+  web:
+    image: ghcr.io/open-webui/open-webui:0.10.2-slim
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      WEBUI_URL: ${NETHERA_PUBLIC_URL}
+      WEBUI_SESSION_COOKIE_SECURE: "true"
+      WEBUI_AUTH_COOKIE_SECURE: "true"
+      WEBUI_SESSION_COOKIE_SAME_SITE: lax
+      WEBUI_AUTH_COOKIE_SAME_SITE: lax
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    nethera:
+      public: 8080       # exposes this service's port 8080 as a public HTTPS endpoint
+      auth: login         # protects first admin signup behind Nethera login
+  ollama:
+    image: ollama/ollama:0.31.2
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+volumes:
+  open-webui:
+  ollama:

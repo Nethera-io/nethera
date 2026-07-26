@@ -1,0 +1,38 @@
+appName: n8n
+services:
+  web:
+    image: n8nio/n8n:latest
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: db
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: n8n
+
+      N8N_HOST: ${NETHERA_PUBLIC_HOST}
+      N8N_PROTOCOL: https
+      WEBHOOK_URL: ${NETHERA_PUBLIC_URL}/
+      N8N_EDITOR_BASE_URL: ${NETHERA_PUBLIC_URL}/
+
+    volumes:
+      - n8n-data:/home/node/.n8n
+    depends_on:
+      - db
+    nethera:
+      public: 5678    # exposes this container's port 5678 over the public HTTPS endpoint
+      auth: login     # protects n8n owner setup behind Nethera login
+      secrets:
+        - N8N_ENCRYPTION_KEY
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: n8n
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: n8n
+    volumes:
+      - n8n-db:/var/lib/postgresql/data
+
+volumes:
+  n8n-data:
+  n8n-db:

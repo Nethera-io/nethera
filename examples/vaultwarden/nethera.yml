@@ -1,0 +1,15 @@
+appName: vaultwarden
+services:
+  web:
+    image: vaultwarden/server:latest
+    environment:
+      DOMAIN: ${NETHERA_PUBLIC_URL}
+      SIGNUPS_ALLOWED: "true"
+    volumes:
+      - vaultwarden-data:/data
+    nethera:
+      public: 80         # exposes container port 80 as the public HTTPS endpoint
+      auth: login        # protects the initial signup page behind Nethera login
+
+volumes:
+  vaultwarden-data:

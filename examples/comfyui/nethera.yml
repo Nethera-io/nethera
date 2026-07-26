@@ -1,0 +1,33 @@
+appName: comfyui
+services:
+  init:
+    image: busybox:1.36
+    restart: "no"
+    command: sh -c "mkdir -p /basedir/models/checkpoints /basedir/models/loras /basedir/output /basedir/custom_nodes && chown -R 1024:1024 /comfy/mnt /basedir"
+    volumes:
+      - comfyui-run:/comfy/mnt
+      - /mnt/nethera/comfyui:/basedir
+
+  comfyui:
+    image: mmartial/comfyui-nvidia-docker:ubuntu22_cuda12.4-20260605
+    environment:
+      BASE_DIRECTORY: /basedir
+      USE_UV: "true"
+      WANTED_UID: "1024"
+      WANTED_GID: "1024"
+    volumes:
+      - comfyui-run:/comfy/mnt
+      - /mnt/nethera/comfyui:/basedir
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    nethera:
+      public: 8188                # container port exposed publicly over HTTPS
+      auth: login                 # requires Nethera login before the endpoint is reachable
+volumes:
+  comfyui-run:
