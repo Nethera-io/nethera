@@ -102,7 +102,7 @@ Four terms come up throughout the docs:
 
 ## Examples
 
-Each example is a small, copyable Nethera app you can deploy with `neth init && neth deploy`:
+Each example is a small, copyable Nethera app. Open the example directory and follow its README; some examples need `neth secrets set` after `neth init` and before `neth deploy`.
 
 | Example | What it is |
 |---|---|
