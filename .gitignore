@@ -7,10 +7,9 @@ backend/dev.db-journal
 backend/prisma/*.db
 backend/prisma/*.db-journal
 
-# Go / agent / cli
-agent/bin/
-cli/bin/
-cli/cli
+# Go artifacts
+bin/
+neth
 *.test
 
 # OS/editor junk
