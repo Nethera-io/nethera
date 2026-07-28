@@ -2,22 +2,17 @@
 
 Example Nethera app for the [ci-runner recipe](https://nethera.io/docs/recipes/ci-runner).
 
-## Secrets
-
-Set these before deploying:
-
-```bash
-neth secrets set GITLAB_URL https://gitlab.com
-neth secrets set GITLAB_RUNNER_TOKEN <runner-token>
-```
-
 ## Deploy
 
-From this directory:
+From this example directory, run:
 
 ```bash
 neth init
+neth secrets set GITLAB_URL "https://gitlab.com"
+neth secrets set GITLAB_RUNNER_TOKEN "glrt-YOUR_TOKEN"
 neth deploy
 ```
 
-Open the endpoint printed by `neth deploy`.
+`GITLAB_RUNNER_TOKEN` is the runner authentication token from GitLab.
+
+This example does not create a public endpoint. The `postDeploy` step registers the runner after deployment.
