@@ -269,9 +269,44 @@ install_docker_packages() {
   esac
 }
 
+docker_engine_available() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+
+prompt_for_docker_engine() {
+  cat >&2 <<'EOF'
+Docker is installed, but the Docker engine is not responding.
+
+Start Docker Engine, then Nethera can deploy apps to this machine.
+
+On Linux:
+  sudo systemctl start docker
+
+On Docker Desktop / WSL:
+  Open Docker Desktop and wait until it says Docker is running.
+EOF
+
+  if [ -r /dev/tty ] && printf '\nPress Enter after Docker is running, or type "skip" to continue for now: ' >/dev/tty 2>/dev/null; then
+    if read -r docker_wait_answer </dev/tty; then
+      case "$docker_wait_answer" in
+        skip|SKIP|s|S)
+          echo "Continuing without a reachable Docker engine. Deploys will wait until Docker is running." >&2
+          return 0
+          ;;
+      esac
+      if docker_engine_available; then
+        echo "Docker Engine is running."
+        return 0
+      fi
+    fi
+  fi
+
+  echo "Docker Engine is still not reachable. Deploys will wait until Docker is running." >&2
+}
+
 install_docker_if_missing() {
-  if command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1; then
-    echo "Docker is already installed."
+  if command -v docker >/dev/null 2>&1; then
+    echo "Docker CLI is already installed."
   else
     echo "Installing Docker Engine..."
     install_docker_packages
@@ -295,6 +330,10 @@ install_docker_if_missing() {
 
   if command -v systemctl >/dev/null 2>&1; then
     systemctl enable --now docker >/dev/null 2>&1 || true
+  fi
+
+  if ! docker_engine_available; then
+    prompt_for_docker_engine
   fi
 }
 
