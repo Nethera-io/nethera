@@ -243,12 +243,12 @@ if ! path_contains_dir "$INSTALL_DIR"; then
 fi
 
 echo
-if [ "$NETHERA_ENV" = "staging" ]; then
-  echo "Installed Nethera CLI for staging."
-  echo "This installer configures the neth CLI for the staging environment."
-  echo "If you later install the production CLI, your default environment may change."
-else
+if [ "$NETHERA_ENV" = "prod" ]; then
   echo "Nethera CLI installed successfully."
+else
+  echo "Nethera CLI installed successfully for $NETHERA_ENV."
+  echo "This installer configures the neth CLI for the $NETHERA_ENV environment."
+  echo "If you later install another environment, your default environment may change."
 fi
 echo "This CLI talks to:"
 echo "$NETHERA_API_URL"

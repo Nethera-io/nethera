@@ -200,10 +200,10 @@ func TestGroupedDeployEndpointsCollapsesSharedHostnames(t *testing.T) {
 		[]string{"homebox2", "laptop"},
 		map[string][]deployEndpointSummary{
 			"homebox2": {
-				{Hostname: "n8n-web-t2k5.sg.staging.nethera.io", AuthMode: "login"},
+				{Hostname: "n8n-web-t2k5.sg.nethera.io", AuthMode: "login"},
 			},
 			"laptop": {
-				{Hostname: "n8n-web-t2k5.sg.staging.nethera.io", AuthMode: "login"},
+				{Hostname: "n8n-web-t2k5.sg.nethera.io", AuthMode: "login"},
 			},
 		},
 	)
@@ -213,7 +213,7 @@ func TestGroupedDeployEndpointsCollapsesSharedHostnames(t *testing.T) {
 	if got := strings.Join(groups[0].Machines, ", "); got != "homebox2, laptop" {
 		t.Fatalf("unexpected grouped machines: %s", got)
 	}
-	if len(groups[0].Endpoints) != 1 || groups[0].Endpoints[0].Hostname != "n8n-web-t2k5.sg.staging.nethera.io" {
+	if len(groups[0].Endpoints) != 1 || groups[0].Endpoints[0].Hostname != "n8n-web-t2k5.sg.nethera.io" {
 		t.Fatalf("unexpected grouped endpoints: %#v", groups[0].Endpoints)
 	}
 }

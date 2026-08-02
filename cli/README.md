@@ -25,27 +25,9 @@ Build locally:
 go build -o neth .
 ```
 
-## Release
+## Install
 
-Downloads are built and published by `nethera-ops`.
-
-The default ops layout expects this repository next to the others:
-
-```text
-projects/
-  nethera-cli/
-  nethera-agent/
-  nethera-ops/
-```
-
-Then:
-
-```bash
-cd ../nethera-ops
-./deploy/release-deploy-downloads.sh staging v0.1.58
-```
-
-The public install script still installs the normal command:
+The public install script installs the normal command:
 
 ```bash
 curl -fsSL https://get.nethera.io/cli | sh

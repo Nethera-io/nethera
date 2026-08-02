@@ -35,9 +35,6 @@ func agentEnvironmentForBackend(backendURL string) string {
 		return value
 	}
 	normalized := strings.ToLower(strings.TrimSpace(backendURL))
-	if strings.Contains(normalized, "api.staging.nethera.io") || strings.Contains(normalized, ".staging.nethera.io") {
-		return "staging"
-	}
 	if strings.Contains(normalized, "api.nethera.io") {
 		return "prod"
 	}

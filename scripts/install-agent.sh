@@ -544,12 +544,12 @@ prompt_start_pairing
 start_service
 
 echo
-if [ "$NETHERA_ENV" = "staging" ]; then
-  echo "Nethera agent installed and started for staging."
+if [ "$NETHERA_ENV" = "prod" ]; then
+  echo "Nethera agent installed and started."
+else
+  echo "Nethera agent installed and started for $NETHERA_ENV."
   echo "This agent talks to:"
   echo "  $NETHERA_API_URL"
-else
-  echo "Nethera agent installed and started."
 fi
 echo "Check status:"
 echo "  sudo systemctl status nethera-agent"

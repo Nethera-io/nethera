@@ -31,7 +31,7 @@ run_case() {
   mkdir -p "$fake_root/etc/nethera"
   printf '%s\n' "$os_release" >"$fake_root/etc/os-release"
   cat >"$fake_root/etc/nethera/agent.env" <<'EOF'
-NETHERA_ENV=prod
+NETHERA_ENV=test
 NETHERA_AGENT_CUSTOM_TEST=value
 EOF
 
@@ -62,7 +62,7 @@ while [ "$#" -gt 0 ]; do
 done
   case "$url" in
   file://*) cp "${url#file://}" "$output" ;;
-  https://get.staging.nethera.io/releases/agent/latest/*)
+  https://get.nethera.io/releases/agent/latest/*)
     cp "$FAKE_DOWNLOAD_DIR/$(basename "$url")" "$output"
     ;;
   https://download.docker.com/*/docker-ce.repo)
@@ -86,6 +86,20 @@ if [ "\${1:-}" = "config-manager" ] && [ "\${2:-}" = "--help" ]; then
   echo "--add-repo"
   exit 0
 fi
+case " \$* " in
+  *" docker-ce "*)
+    cat >"$fake_bin/docker" <<'DOCKER'
+#!/bin/sh
+case "$*" in
+  "version") exit 0 ;;
+  "info") exit 0 ;;
+  "compose version") exit 0 ;;
+esac
+exit 0
+DOCKER
+    chmod +x "$fake_bin/docker"
+    ;;
+esac
 exit 0
 EOF
   chmod +x "$fake_bin/dnf"
@@ -93,6 +107,20 @@ EOF
   cat >"$fake_bin/yum" <<EOF
 #!/bin/sh
 printf 'yum %s\n' "\$*" >>"$log_file"
+case " \$* " in
+  *" docker-ce "*)
+    cat >"$fake_bin/docker" <<'DOCKER'
+#!/bin/sh
+case "$*" in
+  "version") exit 0 ;;
+  "info") exit 0 ;;
+  "compose version") exit 0 ;;
+esac
+exit 0
+DOCKER
+    chmod +x "$fake_bin/docker"
+    ;;
+esac
 exit 0
 EOF
   chmod +x "$fake_bin/yum"
@@ -115,17 +143,6 @@ EOF
 exit 1
 EOF
   chmod +x "$fake_bin/dpkg-query"
-
-  cat >"$fake_bin/docker" <<EOF
-#!/bin/sh
-printf 'docker %s\n' "\$*" >>"$log_file"
-case "\$*" in
-  "version") exit 1 ;;
-  "compose version") exit 0 ;;
-esac
-exit 0
-EOF
-  chmod +x "$fake_bin/docker"
 
   cat >"$fake_bin/chown" <<EOF
 #!/bin/sh
@@ -163,7 +180,7 @@ case "${1:-}" in
     done
     [ -n "$config_path" ] || exit 1
     mkdir -p "$(dirname "$config_path")"
-    printf '{"machineId":"test","machineToken":"test","environment":"staging"}\n' >"$config_path"
+    printf '{"machineId":"test","machineToken":"test","environment":"prod"}\n' >"$config_path"
     ;;
 esac
 EOF
@@ -173,9 +190,9 @@ EOF
   PATH="$fake_bin" \
     FAKE_DOWNLOAD_DIR="$download_base" \
     NETHERA_AGENT_INSTALL_ROOT="$fake_root" \
-    NETHERA_ENV=staging \
-    NETHERA_API_URL=https://api.staging.nethera.io \
-    NETHERA_DOWNLOADS_BASE_URL=https://get.staging.nethera.io \
+    NETHERA_ENV=prod \
+    NETHERA_API_URL=https://api.nethera.io \
+    NETHERA_DOWNLOADS_BASE_URL=https://get.nethera.io \
     "$ROOT_DIR/scripts/install-agent.sh" </dev/null >/tmp/nethera-install-agent-"$name".log 2>&1 || {
       cat /tmp/nethera-install-agent-"$name".log >&2
       fail "$name installer failed"
@@ -190,10 +207,10 @@ EOF
     fail "$name did not install expected WireGuard package"
   }
   test -x "$fake_root/usr/local/bin/nethera-agent" || fail "$name did not install agent binary"
-  grep -q 'NETHERA_ENV=staging' "$fake_root/etc/nethera/agent.env" || fail "$name did not write agent env"
+  grep -q 'NETHERA_ENV=prod' "$fake_root/etc/nethera/agent.env" || fail "$name did not write agent env"
   grep -q 'NETHERA_AGENT_CONFIG_DIR=/etc/nethera' "$fake_root/etc/nethera/agent.env" || fail "$name did not write agent config dir"
   grep -q 'NETHERA_AGENT_CUSTOM_TEST=value' "$fake_root/etc/nethera/agent.env" || fail "$name did not preserve custom agent env"
-  ! grep -q 'NETHERA_ENV=prod' "$fake_root/etc/nethera/agent.env" || fail "$name kept stale agent env"
+  ! grep -q 'NETHERA_ENV=test' "$fake_root/etc/nethera/agent.env" || fail "$name kept stale agent env"
   grep -q 'ExecStart=/usr/local/bin/nethera-agent --backend ${NETHERA_API_URL} --config /etc/nethera/machine.json' "$fake_root/etc/systemd/system/nethera-agent.service" ||
     fail "$name did not write explicit machine config path"
 

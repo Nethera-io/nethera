@@ -116,22 +116,19 @@ func TestInstallerEnvironmentPaths(t *testing.T) {
 	}
 }
 
-func TestAgentEnvironmentForBackendInfersStaging(t *testing.T) {
+func TestAgentEnvironmentForBackendInfersProd(t *testing.T) {
 	t.Setenv("NETHERA_ENV", "")
 
-	if got := agentEnvironmentForBackend("https://api.staging.nethera.io"); got != "staging" {
-		t.Fatalf("agentEnvironmentForBackend(staging) = %q, want staging", got)
-	}
 	if got := agentEnvironmentForBackend("https://api.nethera.io"); got != "prod" {
 		t.Fatalf("agentEnvironmentForBackend(prod) = %q, want prod", got)
 	}
 }
 
 func TestAgentEnvironmentForBackendHonorsExplicitEnv(t *testing.T) {
-	t.Setenv("NETHERA_ENV", "staging")
+	t.Setenv("NETHERA_ENV", "test")
 
-	if got := agentEnvironmentForBackend("https://api.nethera.io"); got != "staging" {
-		t.Fatalf("agentEnvironmentForBackend() = %q, want explicit staging", got)
+	if got := agentEnvironmentForBackend("https://api.nethera.io"); got != "test" {
+		t.Fatalf("agentEnvironmentForBackend() = %q, want explicit test", got)
 	}
 }
 
