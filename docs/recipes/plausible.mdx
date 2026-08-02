@@ -131,6 +131,5 @@ Yes, `neth deploy` from your project directory redeploys in place. If you're man
 ## Notes
 
 * Start with `auth: login` for first admin creation. Switch to `auth: none` after setup so the tracking script and event API can be reached publicly.
-* The image tag is pinned to `v3.2.0`. Bump it deliberately rather than tracking `latest`.
 * ClickHouse is memory-hungry; make sure the machine running the Nethera agent has enough RAM for it, not just disk space.
 * The Postgres password shown here is only reachable inside the Compose network in this recipe. Change it if you adapt the stack or expose the database elsewhere.

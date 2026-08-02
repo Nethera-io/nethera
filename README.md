@@ -41,7 +41,7 @@ neth deploy
 
 The normal first-deployment flow:
 
-**1. Install the CLI** - on your laptop or dev machine (see [Installation](#installation) for pinning a version):
+**1. Install the CLI** - on your laptop or dev machine:
 
 ```bash
 curl -fsSL https://get.nethera.io/cli | sh
@@ -160,12 +160,6 @@ neth deploy
 
 ```bash
 curl -fsSL https://get.nethera.io/cli | sh
-```
-
-Pin a specific version:
-
-```bash
-curl -fsSL https://get.nethera.io/cli | sh -s -- --version 0.1.49
 ```
 
 ### Agent
