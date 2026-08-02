@@ -1,0 +1,158 @@
+---
+
+title: Self-host Paperless-ngx with a public URL
+description: Deploy Paperless-ngx as a Docker Compose app and reach it from anywhere over HTTPS, without port forwarding or a static IP.
+----------------------------------------------------------------------------------------------------------------------------------------
+
+This deploys Paperless-ngx, a document management and OCR system, along with its Postgres and Redis dependencies, and exposes the web UI at a public HTTPS URL that Nethera assigns. For a full introduction to how Nethera works, see [/docs](/docs).
+
+## Why self-host Paperless-ngx
+
+The realistic alternative to this isn't "no document management," it's Paperless-ngx running on a home server or NAS that you can only reach on your LAN. That works fine at your desk, but it breaks the actual use case: scanning a receipt or ID at the point you need it, then pulling it up later from your phone, a client's office, or anywhere that isn't your home network. The usual fixes for that (port forwarding to a self-hosted box, or dropping the documents into Google Drive/Dropbox instead) either open a raw port on your home connection or hand tax records, contracts, and IDs to someone else's cloud. Deploying via Nethera keeps the documents on infrastructure you control and still gives you a URL that works from outside your network, without you configuring the router or trusting a third party with the files.
+
+<Callout type="info">
+  Already running Paperless-ngx with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent, reachable by the CLI
+
+See [/docs/quickstart](/docs/quickstart) for setup of both.
+
+## nethera.yml
+
+```yaml id="8ohzbk"
+appName: paperless
+services:
+  web:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    environment:
+      PAPERLESS_REDIS: redis://redis:6379
+      PAPERLESS_DBHOST: db
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_URL: ${NETHERA_PUBLIC_URL}
+    volumes:
+      - paperless-data:/usr/src/paperless/data
+      - paperless-media:/usr/src/paperless/media
+      - paperless-export:/usr/src/paperless/export
+      - /mnt/nethera/paperless/consume:/usr/src/paperless/consume
+    depends_on:
+      - db
+      - redis
+    nethera:
+      public: 8000          # exposes container port 8000 (Paperless's web UI) at the public HTTPS URL
+      auth: login           # requires Nethera login before Paperless-ngx loads
+      secrets:
+        - PAPERLESS_SECRET_KEY
+        - PAPERLESS_DBPASS
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: ${PAPERLESS_DBPASS}
+    volumes:
+      - paperless-db:/var/lib/postgresql/data
+    nethera:
+      secrets:
+        - PAPERLESS_DBPASS
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - paperless-redis:/data
+
+volumes:
+  paperless-data:
+  paperless-media:
+  paperless-export:
+  paperless-db:
+  paperless-redis:
+```
+
+Only `web` has `public: 8000`, so only the Paperless-ngx web UI is exposed through Nethera. Postgres and Redis stay internal to the Compose network.
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash id="1j94hl"
+neth init
+neth secrets set PAPERLESS_SECRET_KEY "$(openssl rand -hex 32)"
+neth secrets set PAPERLESS_DBPASS "$(openssl rand -hex 24)"
+neth deploy
+```
+
+`neth init` prepares the Nethera metadata for the app, including the generated app identifier and target machine selection.
+
+Nethera injects `NETHERA_PUBLIC_URL` into the deployment env file, so Paperless-ngx gets the correct public URL during the first deploy.
+
+## Open and verify
+
+Open the HTTPS endpoint printed by `neth deploy`. You'll be prompted for Nethera login before Paperless-ngx loads. You can then create an admin account.
+
+## Lock down normal use
+
+After the first admin account exists, change the service's Nethera auth to `none` if you want Paperless's own users and permissions to be the only app access layer:
+
+```yaml
+nethera:
+  public: 8000
+  auth: none
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+## Data and config notes
+
+* `/mnt/nethera/paperless/consume` is the drop folder on the machine running the Nethera agent: anything placed in it gets OCR'd and imported automatically. Use [file transfer](/docs/file-transfer) to copy documents there from your local machine.
+* `paperless-media` holds the processed originals and thumbnails; `paperless-data` holds the search index and app state. Back both up, not just the database.
+* `paperless-export` is where Paperless-ngx writes bulk exports if you run one; it's empty until you do.
+* `PAPERLESS_URL` uses `NETHERA_PUBLIC_URL`, which Nethera injects automatically from the public endpoint.
+* `PAPERLESS_SECRET_KEY` and `PAPERLESS_DBPASS` are stored as Nethera secrets and injected into the containers at deploy time.
+
+## Troubleshooting
+
+**CSRF or "Bad Request" errors on login.** Usually means `PAPERLESS_URL` doesn't match the URL you're actually accessing. Check that it still uses `${NETHERA_PUBLIC_URL}`.
+
+**`web` container restarts on first deploy.** `db` and `redis` may not be ready yet when `web` starts, since `depends_on` here doesn't wait for a health check. Give it a minute and check `web`'s logs; it should come up once Postgres is accepting connections.
+
+**Files dropped in consume aren't showing up.** Confirm they're going into `/mnt/nethera/paperless/consume` on the machine running the Nethera agent, not a local folder on your development machine.
+
+**Paperless-ngx cannot connect to Postgres.** Check that `PAPERLESS_DBPASS` was set before deploy. The recipe uses that one secret for both Paperless-ngx and Postgres.
+
+## FAQ
+
+**Can I access my Paperless-ngx instance from outside my home network?**
+Yes. The `public: 8000` field maps the web UI to the HTTPS URL Nethera assigns, so it's reachable from anywhere, no port forwarding or dynamic DNS setup on your end.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Why run Paperless-ngx myself instead of just scanning documents into Google Drive?**
+Because the documents stay on infrastructure you control instead of a third party's cloud, while you still get the remote access that makes scanning-on-the-go useful in the first place, without opening a port on your home router to get it.
+
+**How do I change the domain after I've already deployed?**
+Use Nethera-generated endpoint env vars for the default endpoint. Custom-domain support is documented separately when available.
+
+**Can I use `auth: none` instead?**
+Yes, if you want Paperless-ngx's own users to be the only access layer and you're comfortable with the Paperless login page being reachable by anyone with the URL. This recipe uses `auth: login` by default because document storage is usually sensitive.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* Back up `paperless-data` and `paperless-media`, not just the Postgres volume; the search index and originals live outside the database.
+* Keep `PAPERLESS_SECRET_KEY` stable. Changing or losing it later can break existing sessions and security-related state.
+* The consume folder is a host path at `/mnt/nethera/paperless/consume`, so files must be placed there on the machine running the agent.

@@ -1,0 +1,104 @@
+---
+
+title: Self-host Ollama with a public URL
+description: Deploy Ollama to your own GPU machine with Nethera and call it over HTTPS from anywhere, no local-only setup or per-token API bills.
+-------------------------------------------------------------------------------------------------------------------------------------------------
+
+Nethera deploys this Ollama Compose stack to a machine you control and exposes it over HTTPS with token auth, no static IP or port forwarding required. See [/docs](/docs) for the full introduction to Nethera.
+
+## Why Ollama
+
+If you're not doing this, the alternative is usually one of two things: hitting a hosted LLM API and paying per token, or running Ollama locally and only ever being able to call it from `localhost`. Neither gets you a GPU-backed model that your other apps, scripts, or devices can actually reach.
+
+Deploying Ollama through Nethera puts inference on hardware you own (the `deploy.resources.reservations.devices` GPU reservation in the config below), and gives it a real HTTPS endpoint instead of a loopback address. You get to call your own models from anywhere, without a per-token bill and without exposing the API with no auth in front of it. You still pay for the hardware, power, and any Nethera subscription.
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine with a GPU available to Docker, running the Nethera agent. The YAML below uses Docker's GPU reservation syntax, most commonly used with NVIDIA Container Toolkit. AMD/ROCm setups may need different image or device settings.
+
+See [/docs/quickstart](/docs/quickstart) for agent setup.
+
+## nethera.yml
+
+```yaml
+appName: ollama
+services:
+  ollama:
+    image: ollama/ollama:0.31.2
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    nethera:
+      public: 11434       # exposes Ollama's API port over HTTPS
+      auth: token          # requires a Nethera endpoint token on every request
+      postDeploy:
+        - |
+          until ollama list >/dev/null 2>&1; do
+            sleep 2
+          done
+          ollama pull llama3.2   # runs after deploy, pulls the model into the volume
+
+volumes:
+  ollama:
+```
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth deploy
+```
+
+## Use
+
+Call the HTTPS endpoint printed by `neth deploy` with a Nethera endpoint token.
+
+## Data and config notes
+
+* Models persist in the `ollama` named volume. Redeploys won't re-pull `llama3.2` unless the volume is removed.
+* To use a different or additional model, add more `ollama pull` lines under `postDeploy`, or pull models manually after deploy.
+* The GPU reservation means this only deploys successfully to an agent machine with a GPU available to Docker.
+
+## Troubleshooting
+
+* **Deploy fails on the GPU reservation**: the target agent machine doesn't have a GPU exposed to Docker. Check `nvidia-smi` and your Docker GPU runtime on that machine.
+* **401 on requests to the endpoint**: missing or wrong Nethera endpoint token. Re-check the token you created during deploy, or create/list tokens with `neth endpoint token`. See [/docs/auth](/docs/auth).
+* **First request after deploy is slow or times out**: the `ollama pull llama3.2` postDeploy step may still be running if the model is large or the connection is slow. Check agent logs before assuming the deploy failed.
+
+## FAQ
+
+**How do I call my Ollama instance from another device or app?**
+Use the HTTPS endpoint URL printed by `neth deploy`, with the Nethera endpoint token as described in [/docs/auth](/docs/auth). It works the same from a laptop, a phone, or another server, since it's a public HTTPS endpoint rather than `localhost`.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want a service that needs to receive inbound calls from outside your network. `auth: login` still gates who's let through if you want that.
+
+**Is this cheaper than using the OpenAI or Anthropic API?**
+It depends on your usage and hardware, but the tradeoff is structural: hosted APIs charge per token indefinitely, while this runs on hardware you already have or bought once. There's no built-in cost comparison here, run your own numbers based on your GPU, power cost, Nethera subscription, and expected usage.
+
+**Can I run a different model instead of llama3.2?**
+Yes. Change or add lines under `postDeploy` in `nethera.yml`, or pull additional models manually after deploy.
+
+**Does this work with any GPU?**
+Not necessarily. The YAML uses Docker's GPU reservation syntax, which is most commonly used with NVIDIA Container Toolkit. AMD/ROCm and other GPU setups may require different Ollama images, device mappings, or runtime configuration.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* No static IP, DNS setup, or router config needed, Nethera handles the public endpoint.
+* `OLLAMA_HOST: 0.0.0.0:11434` makes Ollama listen on the container network interface so Nethera can reach the API port.
+* The `postDeploy` step runs on every deploy that (re)creates the service, so redundant `ollama pull` calls are harmless but not free in time.
+* `auth: token` is the only auth mode shown here; if you need different access control, check [/docs/auth](/docs/auth) for other supported modes.

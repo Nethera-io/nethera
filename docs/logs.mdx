@@ -1,0 +1,21 @@
+---
+title: Logs
+description: Stream live logs from deployed Nethera apps with the CLI.
+---
+
+Nethera log streaming is for temporary debugging. It is not historical log storage or a searchable log aggregation product.
+
+```bash
+neth logs
+neth logs --service web
+neth logs --tail 200
+neth logs --machine home-gpu
+neth logs --deployment dep_123
+neth logs --no-follow
+```
+
+The CLI resolves the app from your current directory when possible. Multi-machine apps may stream from more than one deployment, and output may be prefixed by machine and service.
+
+The agent streams logs outbound to Nethera, so no direct inbound connection to your machine is required.
+
+Application logs may contain sensitive data if the app prints secrets. Nethera does not treat log streaming as secret-redacted.

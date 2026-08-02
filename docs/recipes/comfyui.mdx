@@ -1,0 +1,126 @@
+---
+title: Self-host ComfyUI with a public URL
+description: Deploy ComfyUI as a Docker Compose app on your own GPU machine and get a public HTTPS endpoint, no port forwarding or static IP required.
+---
+
+This recipe deploys [ComfyUI](https://github.com/comfyanonymous/ComfyUI) as a Docker Compose app on a machine you control, with Nethera handling the public HTTPS endpoint. See [/docs](/docs) for how Nethera works under the hood.
+
+## Why ComfyUI
+
+ComfyUI's checkpoints and LoRAs are large, often several gigabytes each, and workflows are saved as reusable node graphs. Running your own persistent instance means you download a model once and it stays on disk under `/mnt/nethera/comfyui` on the target machine, rather than re-provisioning storage every time you spin up a session. Your workflow graphs persist the same way.
+
+## Requirements
+
+- A target machine with an NVIDIA GPU and the NVIDIA Container Toolkit installed (the `deploy.resources.reservations.devices` block requires GPU access at the Docker level).
+- Nethera CLI installed and authenticated.
+
+## nethera.yml
+
+```yaml
+appName: comfyui
+services:
+  init:
+    image: busybox:1.36
+    restart: "no"
+    command: sh -c "mkdir -p /basedir/models/checkpoints /basedir/models/loras /basedir/output /basedir/custom_nodes && chown -R 1024:1024 /comfy/mnt /basedir"
+    volumes:
+      - comfyui-run:/comfy/mnt
+      - /mnt/nethera/comfyui:/basedir
+
+  comfyui:
+    image: mmartial/comfyui-nvidia-docker:ubuntu22_cuda12.4-20260605
+    environment:
+      BASE_DIRECTORY: /basedir
+      USE_UV: "true"
+      WANTED_UID: "1024"
+      WANTED_GID: "1024"
+    volumes:
+      - comfyui-run:/comfy/mnt
+      - /mnt/nethera/comfyui:/basedir
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    nethera:
+      public: 8188                # container port exposed publicly over HTTPS
+      auth: login                 # requires Nethera login before the endpoint is reachable
+volumes:
+  comfyui-run:
+```
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth deploy
+```
+
+`neth init` generates the `appId` and registers the app. `neth deploy` starts it on the target machine.
+
+## Open and verify remotely
+
+After deploy completes, Nethera prints the public HTTPS URL for the app. Open it in a browser. Because `auth: login` is set, you'll be prompted to authenticate through Nethera before ComfyUI loads, there's no direct anonymous access to port 8188.
+
+ComfyUI may download Python packages and other runtime dependencies on first startup. The container can be running before the web UI is ready, so expect the URL to take a while the first time. Use `neth logs` from the project directory to watch progress.
+
+## Copy models and outputs
+
+ComfyUI model files are large, so this recipe uses a bind mount on the target machine. Replace `laptop` with your Nethera machine name.
+
+```bash
+neth copy ./dreamshaper.safetensors laptop:/mnt/nethera/comfyui/models/checkpoints/
+neth copy ./detailer-lora.safetensors laptop:/mnt/nethera/comfyui/models/loras/
+neth ls laptop:/mnt/nethera/comfyui/models
+```
+
+Generated images are written under `/mnt/nethera/comfyui/output` on the target machine. Copy them back to your laptop when you need them locally:
+
+```bash
+neth copy laptop:/mnt/nethera/comfyui/output ./comfyui-output
+```
+
+## Data and config notes
+
+- Model checkpoints, LoRAs, generated images, and custom nodes go under `/basedir` inside the container, which is bind-mounted to `/mnt/nethera/comfyui` on the target machine.
+- `/comfy/mnt` (the `comfyui-run` volume) is runtime/working state for ComfyUI itself.
+- The image runs as UID/GID `1024:1024`. The `init` service creates the common ComfyUI folders and fixes ownership before ComfyUI starts. See [init containers](/docs/init-containers) for the pattern.
+- `USE_UV: "true"` tells the image to use `uv` for Python dependency management inside the container, this affects first-boot install time, not runtime behavior.
+- Bind mounts make model transfer explicit: files in `/mnt/nethera/comfyui/models` on the machine appear inside ComfyUI at `/basedir/models`.
+
+## Troubleshooting
+
+- **Deploy fails or container won't start, GPU not detected**: confirm the NVIDIA Container Toolkit is installed and configured on the target machine. The `capabilities: [gpu]` reservation will fail the container if the host can't present a GPU to Docker.
+- **Container exits with an unexpected owner/group error**: confirm the `init` service is present and has `restart: "no"`. It should create and chown `/mnt/nethera/comfyui` through the `/basedir` bind mount before ComfyUI starts.
+- **First load is slow**: with `USE_UV: "true"`, the image resolves Python dependencies on first boot. Subsequent restarts are faster since the environment is cached in the volume.
+- **Endpoint loads a login screen instead of ComfyUI**: expected behavior with `auth: login`, authenticate through Nethera first.
+
+## FAQ
+
+**Can I use ComfyUI remotely, like from my phone or a different network?**
+Yes. The `nethera.yml` above exposes it over a public HTTPS URL, so once deployed you reach it the same way from any device or network, no VPN or router configuration needed.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Do I lose my downloaded models if I redeploy?**
+No, as long as they were saved under `/basedir`. That path is backed by `/mnt/nethera/comfyui` on the target machine, which persists independently of the container lifecycle.
+
+**Does this setup work without a GPU?**
+No. This `nethera.yml` uses the `mmartial/comfyui-nvidia-docker` image and reserves GPU resources in the `deploy` block. Without a compatible NVIDIA GPU and driver stack on the target machine, the container won't start as configured.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+- `auth: login` is on by default in this config; remove it from the YAML if you want the endpoint open without a Nethera login (not covered here).
+- The bind mount path `/mnt/nethera/comfyui` is on the target machine, not your laptop.
+- `appId` and `<machine>` are placeholders filled in by `neth init` and your target machine registration, not values to hand-edit.

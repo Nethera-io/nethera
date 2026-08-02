@@ -1,0 +1,216 @@
+---
+title: Troubleshooting
+description: Common deployment and machine issues.
+---
+
+## Local build contexts are rejected
+
+Nethera does not upload source directories for MVP.
+
+```yaml
+services:
+  web:
+    build: .
+```
+
+Build and push an image to a registry, then reference it with `image:`.
+
+## Relative volume paths are rejected
+
+This is not supported:
+
+```yaml
+services:
+  web:
+    volumes:
+      - ./data:/data
+```
+
+Use an absolute path on the target machine:
+
+```yaml
+services:
+  web:
+    volumes:
+      - /mnt/nethera/app-data:/data
+```
+
+## env_file is rejected
+
+Use app-scoped secrets instead:
+
+```bash
+neth secrets set API_KEY
+```
+
+Then list the secret under `services.<service>.nethera.secrets`.
+
+## Agent installed but no machine appears
+
+The agent initiates pairing after installation. Follow the pairing prompt shown by the agent. Then check:
+
+```bash
+sudo systemctl status nethera-agent
+sudo journalctl -u nethera-agent -n 100 --no-pager
+```
+
+## Endpoint requires login unexpectedly
+
+Check `nethera.auth`.
+
+- `auth: none` means public.
+- `auth: login` means Nethera login is required.
+- `auth: token` means API clients must send `Authorization: Bearer <token>`.
+
+## API endpoint returns 401
+
+For `auth: token` endpoints, create or list endpoint tokens:
+
+```bash
+neth endpoint token list
+neth endpoint token create api --name "Local client"
+```
+
+Use the token as a bearer token:
+
+```bash
+curl -H "Authorization: Bearer <token>" https://example.sg.nethera.io/
+```
+
+If the token was revoked, create a new token and update the client.
+
+## Endpoint returns 503
+
+A Nethera `503` means the edge could not reach a healthy backend for the endpoint.
+
+Check:
+
+- the target machine is management-enabled;
+- Docker is running on the machine;
+- the container is running and listening on the expected port;
+- `neth logs` for container startup errors;
+- whether bandwidth or billing limits have disabled routes.
+
+```bash
+neth machine stats
+neth logs
+```
+
+## Custom domain is pending or has TLS errors
+
+Check that the custom hostname points to the DNS target shown in the dashboard. Nethera verifies DNS automatically, but DNS propagation can take time.
+
+If the domain is active but the browser shows a TLS error, check that the hostname is proxied or configured exactly as requested in the dashboard, and that you are visiting the same hostname you added.
+
+## Private image pull fails
+
+Private image pulls require Pro and valid image pull credentials:
+
+```yaml
+nethera:
+  imagePullCredentials:
+    - registry: ghcr.io
+      usernameSecret: GHCR_USERNAME
+      passwordSecret: GHCR_TOKEN
+```
+
+Both referenced secrets must exist before deploy:
+
+```bash
+neth secrets set GHCR_USERNAME your-username
+neth secrets set GHCR_TOKEN <token>
+```
+
+The credentials are used for Docker login on the machine. They are not injected into the container unless also listed under `nethera.secrets`.
+
+## Port bind conflict
+
+If Docker reports that a port is already allocated, another container or process on the machine is already using the host port Nethera selected.
+
+Check the machine:
+
+```bash
+docker ps
+sudo ss -ltnp
+```
+
+Then stop the conflicting process or redeploy after cleaning up stale containers.
+
+## preferLan is enabled but no LAN redirect happens
+
+`preferLan` is best-effort. The machine and browser must appear to Nethera through the same public network and IP family.
+
+Use the LAN endpoint printed by `neth deploy` when possible. For mobile apps that have their own server URL settings, configure the app with the LAN endpoint directly.
+
+See [Local access](/docs/local-access).
+
+## postDeploy failed
+
+`nethera.postDeploy` runs after Compose starts the service. Nethera waits until container exec is available, but it does not know when the application itself is ready.
+
+Make post-deploy commands safe to retry and include a readiness loop when needed:
+
+```yaml
+nethera:
+  postDeploy:
+    - |
+      until my-app status >/dev/null 2>&1; do
+        sleep 2
+      done
+      my-app setup
+```
+
+## GPU containers start but do not use the GPU
+
+GPU apps need two layers to work:
+
+1. The host must see the GPU.
+2. Docker must be able to pass that GPU into containers.
+
+Start with the machine stats output:
+
+```bash
+neth machine stats
+```
+
+If the agent can diagnose the machine, the output includes a `gpu:` line. `ready` means the host driver, GPU device, Docker, Docker Compose, and Docker's NVIDIA runtime checks all passed. `needs attention` or `not ready` tells you the first failing check.
+
+On WSL2, the GPU device is usually `/dev/dxg`, not `/dev/nvidia*`. That is normal. On bare-metal Linux, NVIDIA devices usually appear as `/dev/nvidia*`.
+
+On the target machine, these checks should pass:
+
+```bash
+nvidia-smi
+docker info --format '{{json .Runtimes}}'
+docker compose version
+```
+
+For NVIDIA GPUs, Docker should report an `nvidia` runtime. If it does not, install and configure NVIDIA Container Toolkit, then restart Docker:
+
+```bash
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+In `nethera.yml`, use Docker Compose's GPU reservation shape:
+
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - capabilities: [gpu]
+```
+
+For Ollama, also check the app logs:
+
+```bash
+neth logs --service ollama
+```
+
+If Ollama is running but using CPU, the usual causes are:
+
+- Docker cannot see the NVIDIA runtime.
+- The Compose file does not request a GPU device.
+- The image was started before Docker's NVIDIA runtime was configured; redeploy after fixing Docker.
+- The selected model has not loaded yet, or the first request is still downloading/loading it.

@@ -1,0 +1,36 @@
+---
+title: Introduction
+description: What Nethera is, how it fits together, and where to go next.
+---
+
+Nethera deploys Docker Compose apps to Linux machines you control and gives them a public HTTPS endpoint. Pair a machine, whether that's a home server, a GPU rig, or a box in an office, write a `nethera.yml`, and deploy. There's no static IP to buy, no port forwarding, and no router configuration.
+
+## How it fits together
+
+Four terms come up throughout these docs:
+
+- **Machine** - a Linux box you've paired with the `neth` agent. You can pair one or many.
+- **App** - one or more services described in a `nethera.yml`, deployed together to one or more machines.
+- **Endpoint** - the public HTTPS URL Nethera creates for a service you've marked as public.
+- **nethera.yml** - a `docker-compose.yml` with some small additions: a few top-level fields that say what the app is called and which machines it targets, and a `nethera:` block on any service you want reachable from outside your network. Everything else works the way it already does in Compose.
+
+## Where to start
+
+- **New to Nethera?** Go to [Quickstart](/docs/quickstart) and deploy something in a few minutes.
+- **Deploying something already documented**, like Ollama, ComfyUI, or Open WebUI? Start from a [recipe](/docs/recipes) instead, it's the fastest path.
+- **Want the mental model first?** [Core concepts](/docs/core-concepts) covers machines, secrets, and endpoints in more depth before you write a spec file.
+
+## Next steps
+
+<DocsCardGrid>
+  <DocsCard
+    href="/docs/quickstart"
+    title="Quickstart"
+    description="Start from a recipe, an existing Compose file, or a blank project."
+  />
+  <DocsCard
+    href="/docs/core-concepts"
+    title="Core concepts"
+    description="Learn the small vocabulary behind machines, apps, endpoints, and secrets."
+  />
+</DocsCardGrid>

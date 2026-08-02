@@ -1,0 +1,45 @@
+---
+title: Deploy
+description: Deploy a nethera.yml app to a paired machine.
+---
+
+Deploys use the `nethera.yml` file in your current directory by default.
+
+```bash
+neth deploy
+```
+
+Nethera sends a deployment job to the selected machine. The agent writes generated deployment files on that machine and runs Docker Compose.
+
+## Change targets
+
+Use `neth machine select` to reopen the machine picker from `neth init`:
+
+```bash
+neth machine select
+neth deploy
+```
+
+Changing targets changes desired state for the app. Nethera asks for confirmation before removing old targets.
+
+## What can be deployed
+
+Supported today:
+
+- image-based services;
+- standard environment variables;
+- absolute host-machine volume paths;
+- Docker named volumes;
+- service-level `nethera:` configuration;
+- app secrets;
+- managed text files.
+
+Not supported for MVP:
+
+- `build: .`;
+- uploading source directories;
+- relative directory volumes such as `./data:/data`;
+- `env_file`;
+- large local files or model uploads.
+
+Use [managed files](/docs/managed-files) for small text config files and [secrets](/docs/secrets) for sensitive values.

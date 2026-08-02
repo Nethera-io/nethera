@@ -1,0 +1,130 @@
+---
+title: Endpoints
+description: Public HTTPS URLs that route to service ports on your machines.
+---
+
+An endpoint is a public HTTPS URL managed by Nethera. It maps to a service port on one or more machines through Nethera's edge and the machine tunnel.
+
+Endpoint config lives under `services.<service>.nethera.public`.
+
+```yaml
+services:
+  web:
+    image: ghcr.io/acme/app:latest
+    nethera:
+      public: 3000
+      auth: login
+```
+
+## Fields
+
+- `public` selects the container port to expose. Use `public: 3000` or `public: [3000]`. The list form currently supports one port.
+- `auth` controls whether the endpoint is public, requires Nethera login, or requires a bearer token.
+- `preferLan` optionally redirects same-network browser traffic to the machine's LAN address.
+
+The public port does not need to be listed under Compose `ports`. Nethera binds the tunnel-facing port during deployment.
+
+## Prefer LAN access
+
+For large local apps, such as photo backup, media, or model files, you can ask Nethera to prefer the LAN path when the requester appears to be on the same network as the machine.
+
+For the full behavior and limitations, see [Local access](/docs/local-access).
+
+```yaml
+services:
+  web:
+    image: ghcr.io/acme/app:latest
+    nethera:
+      public: 3000
+      preferLan: true
+```
+
+The agent binds the service to the machine's LAN address as well as the tunnel-facing address. Nethera records one public IP observed from the machine's agent connection. If a request reaches the edge from the same public network, the edge redirects to the local URL, for example `http://192.168.1.42:3000`.
+
+For multi-machine apps, `preferLan` requires `perMachineEndpoints: true`. It is not supported on shared load-balanced endpoints, because one shared hostname may point at more than one LAN address.
+
+For IPv4, the request IP must exactly match the machine's observed public IP. For IPv6, the request IP must share the same `/64` prefix as the machine's observed public IPv6 address.
+
+This is a convenience feature, not a discovery protocol. It assumes devices on the same network are using the same IP family from Nethera's point of view. If the machine is observed over IPv6 but a browser reaches Nethera over IPv4, or the reverse, Nethera will not redirect and the request will continue through the public endpoint.
+
+Endpoint auth is checked before the redirect. If the endpoint uses `auth: login` or `auth: token`, the request must pass that check first.
+
+## Multi-machine endpoints
+
+If a public service targets one machine, Nethera creates one endpoint for that service.
+
+When a public service targets multiple machines on a plan with load balancing, Nethera distributes requests round-robin across service instances that are reachable from the edge.
+
+Agent connection status does not decide whether traffic can be served. If the agent is disconnected, existing traffic may still work. The edge uses service-port reachability to decide which backend instances are eligible.
+
+If your plan does not include load balancing, multi-machine public services must use direct per-machine endpoint URLs. Add:
+
+```yaml
+services:
+  web:
+    image: ghcr.io/acme/app:latest
+    nethera:
+      public: 3000
+      perMachineEndpoints: true
+```
+
+Load-balanced multi-machine endpoints are a Pro feature. Plus supports multi-machine apps through `perMachineEndpoints: true`, which creates one endpoint per machine instead of one shared load-balanced endpoint.
+
+## Service failure alerts
+
+Pro workspaces can configure service failure alerts for a public service. Nethera sends the configured emails and invokes configured webhooks when every backend for the shared endpoint remains unreachable for the configured duration.
+
+```yaml
+services:
+  api:
+    image: ghcr.io/acme/api:latest
+    nethera:
+      public: 8000
+      onServiceFailure:
+        after: 60s
+        emails:
+          - owners
+          - admins
+        webhookSecrets:
+          - FAILOVER_WEBHOOK
+```
+
+```bash
+neth secrets set FAILOVER_WEBHOOK "https://example.com/nethera-failover"
+```
+
+Webhooks are generic HTTPS callbacks. You can use them for Slack or incident notifications, paging, or cold cloud failover automation that starts standby capacity. Nethera continues returning `503` until a backend becomes reachable. It does not queue or replay the original request.
+
+Webhook requests include `X-Nethera-Event`, `X-Nethera-Delivery`, `X-Nethera-Timestamp`, and `X-Nethera-Signature` headers. Verify the signature against the raw request body before acting on the service failure request.
+
+## Endpoint environment variables
+
+When a deployment has a public endpoint, Nethera injects the endpoint URL and hostname through the same env-file mechanism used for app secrets.
+
+For one public endpoint, services receive:
+
+```text
+NETHERA_PUBLIC_HOST=example-web-a7fa.sg.nethera.io
+NETHERA_PUBLIC_URL=https://example-web-a7fa.sg.nethera.io
+NETHERA_WEB_HOST=example-web-a7fa.sg.nethera.io
+NETHERA_WEB_URL=https://example-web-a7fa.sg.nethera.io
+```
+
+For multiple public services, each endpoint is available as `NETHERA_<SERVICE>_URL` and `NETHERA_<SERVICE>_HOST`, for example `NETHERA_API_URL` and `NETHERA_API_HOST`.
+
+When `preferLan: true` is enabled and the agent can determine a LAN endpoint, services also receive LAN values:
+
+```text
+NETHERA_LAN_HOST=192.168.1.50:32783
+NETHERA_LAN_URL=http://192.168.1.50:32783
+NETHERA_WEB_LAN_HOST=192.168.1.50:32783
+NETHERA_WEB_LAN_URL=http://192.168.1.50:32783
+```
+
+The traffic path is:
+
+```text
+Browser -> Nethera edge -> WireGuard tunnel -> user machine -> Docker service
+```
+
+If no backend instance is reachable for an endpoint, the edge returns a controlled `503` response.

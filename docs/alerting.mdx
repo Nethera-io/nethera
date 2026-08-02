@@ -1,0 +1,61 @@
+---
+title: Alerting
+description: Send emails and webhooks when a public service has no reachable backend.
+---
+
+Nethera can alert when every backend behind a public service is unreachable for a configured period.
+
+Service failure alerts are a Pro feature.
+
+Use `onServiceFailure` under the service's `nethera:` block:
+
+```yaml
+services:
+  api:
+    image: ghcr.io/acme/api:latest
+    nethera:
+      public: 8000
+      onServiceFailure:
+        after: 60s
+        emails:
+          - owners
+          - admins
+        webhookSecrets:
+          - SERVICE_FAILURE_WEBHOOK
+```
+
+```bash
+neth secrets set SERVICE_FAILURE_WEBHOOK "https://example.com/nethera-service-failure"
+```
+
+## What triggers an alert
+
+The timer starts only when the edge cannot reach any backend for the shared endpoint. Agent heartbeat alone does not trigger an alert, because a machine can still serve traffic even when the agent is disconnected.
+
+If a backend recovers before `after` elapses, Nethera cancels the pending alert.
+
+## Emails
+
+`emails` accepts:
+
+- `owners`
+- `admins`
+
+If `emails` is omitted, Nethera alerts workspace owners.
+
+Nethera sends one outage email when the alert triggers, and one recovery email when at least one backend becomes reachable again.
+
+## Webhooks
+
+`webhookSecrets` is a list of Nethera secret names. Each secret value must be a full HTTPS webhook URL.
+
+Use webhooks for Slack, incident tools, paging systems, or infrastructure automation such as cold cloud failover.
+
+Webhook requests include:
+
+- `X-Nethera-Event`
+- `X-Nethera-Delivery`
+- `X-Nethera-Timestamp`
+- `X-Nethera-Signature`
+
+Nethera retries transient webhook failures, but does not retry permanent 4xx responses.

@@ -1,0 +1,24 @@
+---
+title: Core concepts
+description: The six ideas that show up throughout these docs.
+---
+
+Nethera has a small vocabulary. Once these ideas click, everything else, recipes, the CLI, the yml spec, reads the same way.
+
+## nethera.yml
+The file that describes your app: which services to run, which machine or machines to run them on, which ports are public, and which secrets they need. It's a `docker-compose.yml` with one addition, a `nethera:` block per service. Everything below is a concept that shows up somewhere in this file. [Read more →](/docs/nethera-yml)
+
+## Machine
+A Linux box you've paired with the `neth` agent. [Read more →](/docs/fleet-management)
+
+## App
+One or more services described in a `nethera.yml`, deployed together. [Read more →](/docs/deploy)
+
+## Endpoint
+The public HTTPS URL Nethera creates for a service you've marked public in `nethera.yml`. [Read more →](/docs/endpoints)
+
+## Secrets
+Values your services need at runtime, set once, referenced by name in `nethera.yml`, injected on deploy, never stored in the file or your repo. [Read more →](/docs/secrets)
+
+## Workspace
+Your account. Machines, apps, and secrets all belong to a workspace. Workspace usage and limits are shown in the dashboard. [Read more →](/docs/usage)

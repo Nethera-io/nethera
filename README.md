@@ -200,6 +200,7 @@ This repository contains:
 ```text
 scripts/    public install scripts for the CLI and agent
 examples/   copyable nethera.yml examples
+docs/       source content for nethera.io/docs
 ```
 
 ...plus the release/download artifact definitions served from `get.nethera.io`.
@@ -209,6 +210,9 @@ examples/   copyable nethera.yml examples
 - Product docs - [nethera.io/docs](https://nethera.io/docs)
 - `nethera.yml` reference - [nethera.io/docs/nethera-yml](https://nethera.io/docs/nethera-yml)
 - Recipes - [nethera.io/docs/recipes](https://nethera.io/docs/recipes)
+
+Docs and recipes are authored in [`docs/`](docs/). The private frontend build
+syncs this directory into its Fumadocs content folder before publishing.
 
 ## License
 

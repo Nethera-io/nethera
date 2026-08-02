@@ -1,0 +1,160 @@
+---
+
+title: Self-host n8n with a public URL
+description: Deploy n8n to a machine you control and give it a public HTTPS endpoint with Nethera, so webhook-triggered workflows actually work.
+------------------------------------------------------------------------------------------------------------------------------------------------
+
+This deploys n8n, an open source workflow automation tool, to a machine you control and exposes it over HTTPS with Nethera. For the full introduction, see [/docs](/docs).
+
+## Why n8n
+
+n8n's webhook and trigger nodes need a real, stable public URL to receive callbacks from other services like GitHub, Stripe, Slack, and form tools. Run n8n on a laptop or home server with no remote access and external services can't call those webhook URLs, so you're limited to manually triggered or scheduled workflows.
+
+The usual fix is n8n Cloud, a VPS, or a tunnel tool like ngrok bolted on top of a local instance. Deploying n8n through Nethera gives it a persistent public HTTPS endpoint so webhook nodes can work from your own machine, without router config, port forwarding, or keeping a separate tunnel process alive.
+
+<Callout type="warning">
+  This recipe starts with Nethera `auth: login` so you can safely complete n8n owner setup. After that, switch Nethera auth to `none` so external services can call n8n webhook URLs without a Nethera login or token prompt.
+</Callout>
+
+<Callout type="info">
+  Already running n8n with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent
+
+See [/docs/quickstart](/docs/quickstart) for setup of both.
+
+## nethera.yml
+
+```yaml id="k9c6er"
+appName: n8n
+services:
+  web:
+    image: n8nio/n8n:latest
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: db
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: n8n
+
+      N8N_HOST: ${NETHERA_PUBLIC_HOST}
+      N8N_PROTOCOL: https
+      WEBHOOK_URL: ${NETHERA_PUBLIC_URL}/
+      N8N_EDITOR_BASE_URL: ${NETHERA_PUBLIC_URL}/
+
+    volumes:
+      - n8n-data:/home/node/.n8n
+    depends_on:
+      - db
+    nethera:
+      public: 5678    # exposes this container's port 5678 over the public HTTPS endpoint
+      auth: login     # protects n8n owner setup behind Nethera login
+      secrets:
+        - N8N_ENCRYPTION_KEY
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: n8n
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: n8n
+    volumes:
+      - n8n-db:/var/lib/postgresql/data
+
+volumes:
+  n8n-data:
+  n8n-db:
+```
+
+Only `web` has a `nethera:` block, so only n8n is exposed through Nethera. Postgres stays internal to the Compose network.
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash id="sadvbe"
+neth init
+neth secrets set N8N_ENCRYPTION_KEY "$(openssl rand -hex 32)"
+neth deploy
+```
+
+`neth init` prepares the Nethera metadata for the app, including the generated app identifier and target machine selection.
+
+Nethera injects `NETHERA_PUBLIC_HOST` and `NETHERA_PUBLIC_URL` into the deployment env file, so n8n can generate webhook URLs during the first deploy.
+
+## Open
+
+Open the HTTPS endpoint printed by `neth deploy`. Nethera will require login before n8n loads, then n8n's setup screen appears on first run.
+
+Complete the owner setup immediately, before sharing the URL or adding real credentials.
+
+## Lock down normal use
+
+After owner setup is complete, change the service's Nethera auth to `none` so webhook providers can reach n8n directly:
+
+```yaml
+nethera:
+  public: 5678
+  auth: none
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+## Data and config notes
+
+* Workflow data, credentials, and settings live in the `n8n-data` volume.
+* Workflow history and execution data are stored in Postgres, backed here by the `n8n-db` volume.
+* Both volumes need to persist across redeploys. Don't remove them unless you intentionally want to reset the instance.
+* `N8N_ENCRYPTION_KEY` is stored as a Nethera secret and injected into the container at deploy time. Set it before first deploy and back it up somewhere safe. Changing or losing it later can make saved credentials unusable.
+* Postgres credentials are set inline in the Compose file (`n8n` / `n8n`). Change them before deploying anything you care about.
+
+## Troubleshooting
+
+**Webhook nodes fail or show the wrong URL.** Check that `N8N_HOST`, `WEBHOOK_URL`, and `N8N_EDITOR_BASE_URL` still use the Nethera-generated env vars from this recipe.
+
+**n8n container restarts or errors on first boot.** `depends_on` only waits for the Postgres container to start, not for Postgres to finish initializing. On first deploy, n8n may try to connect before the database is ready. It should recover on its own after a few restarts.
+
+**Webhook callbacks fail after setup.** Confirm you completed the lock-down step and changed Nethera auth to `none`. Webhook providers cannot pass through a Nethera login gate.
+
+**External service callbacks still don't arrive.** Confirm the external service is using the production webhook URL shown by n8n. Local test URLs won't receive callbacks from external services.
+
+## FAQ
+
+**Can I use n8n's webhook triggers if I self-host it?**
+Yes, but external services need a public, stable URL to reach your instance. That's what `nethera: public: 5678` provides here.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want a service that needs to receive inbound calls from outside your network. `auth: login` still gates who's let through if you want that.
+
+**Why not use `auth: login` or `auth: token`?**
+External services such as GitHub, Stripe, and Slack need to POST directly to n8n's webhook URLs. A Nethera login or token gate in front of the whole endpoint can block those callbacks. This recipe leaves the Nethera endpoint public and relies on n8n's own login for the editor, plus webhook-level validation inside individual workflows.
+
+**Is self-hosting n8n actually cheaper than n8n Cloud?**
+You avoid n8n Cloud's hosted-service pricing, but you're still responsible for the machine running the Nethera agent, storage, backups, and any Nethera subscription. Whether that's cheaper depends on your workflow volume and what you're already running.
+
+**How do I get a public URL for my self-hosted n8n without configuring my router?**
+Nethera handles this. `nethera: public: 5678` exposes the container over HTTPS without port forwarding or a static IP, and `neth deploy` prints the endpoint.
+
+**Can anyone with the URL access the instance?**
+During first setup, Nethera login protects the setup screen. After you switch to `auth: none`, anyone with the URL can reach the n8n login page, but n8n's own login protects the editor. Webhook URLs are public by design, so validate sensitive webhooks using provider signatures, shared secrets, or workflow-level checks.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* Start with `auth: login` for owner setup, then switch to `auth: none` for normal webhook use.
+* Complete n8n owner setup before adding real credentials or workflows.
+* `N8N_HOST`, `WEBHOOK_URL`, and `N8N_EDITOR_BASE_URL` use Nethera-generated endpoint env vars, so there is no separate URL update step.
+* `N8N_ENCRYPTION_KEY` should be set before first deploy and backed up.
+* The Postgres password in this file is a placeholder (`n8n`). Change it before using this in anything beyond a quick test.

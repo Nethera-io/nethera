@@ -1,0 +1,122 @@
+---
+
+title: Self-host NocoDB with a public URL
+description: Deploy NocoDB as a Docker Compose app and get a public HTTPS endpoint for your team, without configuring a server or exposing your network.
+--------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Nethera deploys this NocoDB Compose stack to a machine you control and exposes it over HTTPS with no port forwarding or static IP required. See [/docs](/docs) if you want the full picture of how that works.
+
+## Why NocoDB
+
+The obvious alternative is Airtable: a hosted spreadsheet-database with per-seat pricing and your data sitting on someone else's servers. NocoDB gives you a familiar spreadsheet-database interface, with bases, tables, views, and APIs, while letting you run the service yourself.
+
+Self-hosting NocoDB changes the cost and ownership model, but only if the right people can reach it without you managing VPN access or a hand-rolled tunnel for each teammate. Nethera gives NocoDB a normal HTTPS URL with login required, so anyone on your team can open it directly, and anyone who shouldn't can't.
+
+<Callout type="info">
+  Already running NocoDB with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent
+
+See [/docs/quickstart](/docs/quickstart) for setup of both.
+
+## nethera.yml
+
+```yaml id="xdzkls"
+appName: nocodb
+services:
+  web:
+    image: nocodb/nocodb:latest
+    volumes:
+      - nocodb-data:/usr/app/data
+    nethera:
+      public: 8080     # exposes container port 8080 as the public HTTPS endpoint
+      auth: login      # protects first admin setup behind Nethera login
+      secrets:
+        - NC_AUTH_JWT_SECRET
+
+volumes:
+  nocodb-data:
+```
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash id="dx69vl"
+neth init
+neth secrets set NC_AUTH_JWT_SECRET "$(openssl rand -hex 32)"
+neth deploy
+```
+
+`neth init` prepares the Nethera metadata for the app, including the generated app identifier and target machine selection.
+
+## Open
+
+Open the HTTPS endpoint printed by `neth deploy`. Nethera will require login before NocoDB loads. NocoDB's setup screen will ask you to create the first admin account.
+
+## Lock down normal use
+
+After the first admin account exists, change the service's Nethera auth to `none` if you want NocoDB's own users and permissions to be the only app access layer:
+
+```yaml
+nethera:
+  public: 8080
+  auth: none
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+That admin account is separate from Nethera auth. `auth: none` controls whether Nethera adds its own login gate in front of the endpoint. NocoDB still has its own account system inside the app.
+
+## Data and config notes
+
+* In this minimal SQLite setup, NocoDB's internal database and metadata live in the `nocodb-data` volume.
+* Back up `nocodb-data` if the data matters.
+* If you later connect external databases, those databases need their own backup plan too.
+* `NC_AUTH_JWT_SECRET` is stored as a Nethera secret and injected into the container at deploy time. Set it before first deploy and keep a copy somewhere safe.
+* This recipe uses NocoDB's bundled SQLite store. For heavier use, configure NocoDB with an external Postgres or MySQL database.
+
+## Troubleshooting
+
+**Endpoint loads a blank page or connection error right after deploy.** NocoDB can take a few seconds to finish initializing on first boot. Retry the URL before assuming the deploy failed.
+
+**Port mismatch.** If you change NocoDB's internal port via its own environment variables, update `public:` in `nethera.yml` to match, otherwise the exposed port won't line up with what the container is actually listening on.
+
+**Login sessions break after redeploy.** Check that `NC_AUTH_JWT_SECRET` is set and unchanged. Changing the JWT secret can invalidate existing sessions.
+
+## FAQ
+
+**Can I access my NocoDB instance from outside my home network?**
+Yes. That's what the `public: 8080` field does: it gives you an HTTPS URL that works from anywhere, no VPN or port forwarding needed.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Why self-host NocoDB instead of just using Airtable?**
+Cost structure and data ownership mainly. With self-hosting, your data lives on infrastructure you control, and you are not locked into a hosted spreadsheet-database plan for every seat or usage tier. You are still responsible for the machine, backups, reliability, and any Nethera subscription.
+
+**Does anyone with the URL have access, or is there a login?**
+There are two separate layers. The initial setup uses `auth: login` to protect first admin creation. After you switch to `auth: none`, anyone with the URL can reach the app, and NocoDB's own account system controls access from there.
+
+**Should I use `auth: login` instead?**
+Use `auth: none` when NocoDB's own users and permissions are the access layer. Use `auth: login` if you want only logged-in Nethera users to reach the app at all. For team use, `auth: login` may require every user to have Nethera access as well as a NocoDB account.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* Start with `auth: login` for first admin creation. Switch to `auth: none` only after the admin account exists.
+* Data for this minimal setup lives in the `nocodb-data` volume. Deleting or recreating that volume wipes the instance.
+* External databases connected from NocoDB need their own backups.
+* `NC_AUTH_JWT_SECRET` should be set before first deploy and kept stable across redeploys.

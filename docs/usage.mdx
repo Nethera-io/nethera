@@ -1,0 +1,65 @@
+---
+title: Usage
+description: Bandwidth, overage, alerts, and active machine usage.
+---
+
+Nethera usage is based on workspace activity: public endpoint traffic, active managed machines, endpoints, and team seats.
+
+## Bandwidth
+
+Public endpoint traffic counts toward the workspace's monthly bandwidth allowance.
+
+Current allowances:
+
+- Free: 10 GB/month.
+- Plus: 100 GB/month.
+- Pro: 100 GB per active machine per month, pooled across the workspace.
+
+The dashboard shows current bandwidth usage for the month. The CLI can show the same monthly usage:
+
+```bash
+neth usage
+neth usage --month 2026-07
+```
+
+## Overage
+
+Plus and Pro workspaces can enable bandwidth overage.
+
+- Plus: overage is off by default.
+- Pro: overage is on by default.
+- Extra bandwidth is billed at `$0.12/GB`.
+
+When overage is off and the workspace reaches its included bandwidth, public endpoints may be disabled until the allowance resets or the plan changes.
+
+If usage is already above the current month's allowance, enabling overage resumes endpoint serving and future overage is metered from that point. Changing plan or active machine count can change the current allowance. If the new allowance is lower than current usage and overage is off, Nethera warns before applying the change where possible.
+
+## Usage alerts
+
+Nethera emails workspace owners when usage reaches 80% of the included monthly bandwidth allowance.
+
+If the workspace exceeds its included allowance, Nethera also sends a bandwidth exceeded email.
+
+Service failure alerts are separate. Pro workspaces can configure `onServiceFailure` in `nethera.yml` to email owners/admins and call webhook secrets when every backend for a public service remains unreachable for the configured duration.
+
+## Active managed machines
+
+A machine counts toward active managed machine limits only while management is enabled and the machine is not suspended or deregistered.
+
+Disabling management:
+
+- keeps the machine registered;
+- stops Nethera from managing it;
+- stops it counting as an active managed machine;
+- does not stop local containers;
+- does not delete deployments, files, volumes, or secrets.
+
+Deregistering a machine removes it from Nethera's active lifecycle and revokes its machine token. Local containers are still not stopped unless you explicitly request cleanup.
+
+## Offline machines
+
+Agent connection status is separate from usage.
+
+An offline or agent-disconnected machine can still count as active if management is enabled. Nethera may be unable to deploy changes until the agent reconnects, but existing workloads may still be running locally.
+
+Turning management off stops the machine counting as active, but it can also reduce the workspace's current bandwidth allowance on plans where allowance depends on active machines.

@@ -1,0 +1,45 @@
+---
+title: Managed files
+description: Mount small local text config files into services during deploy.
+---
+
+Managed files are service-level files under the service's `nethera:` block.
+
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    nethera:
+      files:
+        nginx.conf:
+          source: ./nginx.conf
+          target: /etc/nginx/conf.d/default.conf
+          mode: "0644"
+```
+
+## What happens
+
+- `source` is a small local text file read by the CLI at deploy time;
+- `target` is the absolute path inside the container;
+- the backend stores the file with the deployment snapshot;
+- the agent writes the file on the target machine;
+- the generated Compose file mounts it read-only into the service.
+
+Managed files are for small text configuration files such as `nginx.conf`, `prometheus.yml`, JSON, TOML, or YAML config.
+
+They are not for secrets, directories, source trees, model files, SQLite databases, or large binary artifacts.
+
+Use [app secrets](/docs/secrets) for sensitive values.
+
+## Limits and validation
+
+- maximum 10 managed files per service;
+- maximum 64 KB per file;
+- maximum 256 KB total managed file content per deployment;
+- UTF-8 text only;
+- `source` must be a relative path inside the project directory;
+- `source` must not contain `..` path segments;
+- `target` must be an absolute container path;
+- `mode`, if set, must be a four-digit octal string such as `"0644"`.
+
+Use [file transfer](/docs/file-transfer) for larger files, directories, model files, backups, or files you want to copy manually.

@@ -1,0 +1,39 @@
+---
+title: Custom domains
+description: Add your own hostname to a Nethera endpoint.
+---
+
+Custom domains let you attach a hostname you control to a Nethera endpoint.
+
+<Callout type="info">
+  <span>
+    <strong>Pro required.</strong>
+  </span>
+</Callout>
+
+Custom domains are configured from the endpoint detail page in the dashboard.
+
+## Add a domain
+
+1. Deploy an app with a public endpoint.
+2. Open the endpoint in the dashboard.
+3. Add the hostname, for example `app.example.com`.
+4. Create the DNS record shown by Nethera.
+5. Wait for Nethera to verify DNS. This can take a little while after the record is created.
+
+Nethera manages the edge routing and TLS state for the custom hostname.
+
+## Example endpoint
+
+```yaml
+services:
+  web:
+    image: ghcr.io/acme/app:latest
+    nethera:
+      public: 3000
+      auth: none
+```
+
+## Login-protected endpoints
+
+Custom domains work with `auth: login`. When a visitor opens the custom hostname, Nethera redirects them to the normal Nethera login flow, then returns them to the custom domain through a reserved `/.nethera/auth/callback` path. That path is handled by the edge and is not forwarded to your app.

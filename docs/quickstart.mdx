@@ -1,0 +1,98 @@
+---
+title: Quickstart
+description: Start from a recipe, an existing Compose file, or a blank project, then deploy with Nethera.
+---
+
+Nethera deploys Docker Compose apps to Linux machines you control and gives them a public HTTPS endpoint. Pair a machine, write a `nethera.yml`, and deploy. No static IP, port forwarding, or router configuration required.
+
+This quickstart shows the normal first deployment flow.
+
+## 1. Install the CLI
+
+Run this on your laptop or development machine:
+
+<QuickstartInstallCommands />
+
+## 2. Install the agent
+
+Run this on the Linux machine that will run your apps:
+
+<InstallAgentCommand />
+
+The agent initiates pairing and prompts you to attach the machine to your Nethera workspace.
+
+## 3. Choose a starting point
+
+You can start from one of three places.
+
+### Start with a recipe
+
+Pick a [recipe](/docs/recipes), create a project directory, and copy the example `nethera.yml` into it. Then run `neth init` in that directory. If the file already has app content, `neth init` preserves it and adds the missing Nethera metadata such as deployment targets.
+
+### Start with docker-compose.yml
+
+If your project already has `docker-compose.yml` or `compose.yml`, keep it in the project directory. `neth init` can import it into `nethera.yml`. You may still need to replace unsupported local features such as `build:`, relative bind mounts, or `env_file`.
+
+### Start blank
+
+If there is no Compose file, `neth init` creates a small hello-world placeholder `nethera.yml` that you can edit.
+
+## 4. Run neth init
+
+From your project directory:
+
+```bash
+neth init
+```
+
+`neth init` writes `nethera.yml`, asks which paired machine or machines should be deployment targets, and uses the current directory name as the default app name.
+
+## 5. Review nethera.yml
+
+For most apps, you will edit the generated file so each service uses an image and any public service has a `nethera:` block:
+
+```yaml
+appName: example-app
+targets:
+  - home-gpu
+
+services:
+  web:
+    image: ghcr.io/acme/example-app:latest
+    nethera:
+      public: 3000
+      auth: login
+```
+
+## 6. Deploy
+
+From the directory containing `nethera.yml`:
+
+```bash
+neth deploy
+```
+
+When the deploy completes, Nethera prints the public HTTPS endpoint.
+
+## Next steps
+
+<div className="mt-4 grid gap-4 sm:grid-cols-2">
+  <a href="/docs/nethera-yml" className="group rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary/50">
+    <h3 className="flex items-center justify-between font-medium text-foreground">
+      The nethera.yml spec
+      <span className="text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary">→</span>
+    </h3>
+    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+      Learn every field you can configure for a deploy.
+    </p>
+  </a>
+  <a href="/docs/endpoints" className="group rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary/50">
+    <h3 className="flex items-center justify-between font-medium text-foreground">
+      Endpoints and auth
+      <span className="text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary">→</span>
+    </h3>
+    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+      See how public URLs, ports, and Nethera login fit together.
+    </p>
+  </a>
+</div>

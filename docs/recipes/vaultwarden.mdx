@@ -1,0 +1,144 @@
+---
+
+title: Self-host Vaultwarden with a public URL
+description: Run Vaultwarden on your own machine and reach it over HTTPS from anywhere, no port forwarding or static IP required.
+---------------------------------------------------------------------------------------------------------------------------------
+
+This recipe deploys Vaultwarden, a lightweight Bitwarden-compatible password manager, and gives it a public HTTPS endpoint using Nethera; see [/docs](/docs) for how Nethera works.
+
+<Callout type="warning">
+  This recipe starts with Nethera `auth: login` and Vaultwarden signups enabled so you can safely create the first account. After that, turn Vaultwarden signups off and change Nethera auth to `none` so Bitwarden clients and browser extensions can connect normally.
+</Callout>
+
+## Why Vaultwarden
+
+The reason to run Vaultwarden instead of using a hosted password manager is control over where the service and encrypted vault data live. That's the whole point of self-hosting a password manager. The problem is that a self-hosted vault is only as useful as your ability to reach it when you're away from home, which normally means setting up a domain, TLS, and port forwarding yourself before you can unlock it from your phone. Nethera skips that setup and hands you the public endpoint directly, so the vault is something you can actually use day to day instead of something that only works on your home network.
+
+<Callout type="info">
+  Already running Vaultwarden with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent
+
+See [/docs/quickstart](/docs/quickstart) for setup of both.
+
+## nethera.yml
+
+Start with this config for first account creation:
+
+```yaml id="iap4qm"
+appName: vaultwarden
+services:
+  web:
+    image: vaultwarden/server:latest
+    environment:
+      DOMAIN: ${NETHERA_PUBLIC_URL}
+      SIGNUPS_ALLOWED: "true"
+    volumes:
+      - vaultwarden-data:/data
+    nethera:
+      public: 80         # exposes container port 80 as the public HTTPS endpoint
+      auth: login        # protects the initial signup page behind Nethera login
+
+volumes:
+  vaultwarden-data:
+```
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash id="0vto3r"
+neth init
+neth deploy
+```
+
+Nethera injects `NETHERA_PUBLIC_URL` into the deployment env file, so Vaultwarden gets its public `DOMAIN` during the first deploy.
+
+## Create your first account
+
+Open the HTTPS endpoint printed by `neth deploy`. During initial setup, Nethera will require login before Vaultwarden loads.
+
+Create your first Vaultwarden account immediately. This should be the account you intend to use as the owner/admin account.
+
+## Lock down normal use
+
+After creating your first account, update `nethera.yml`:
+
+```yaml id="qnr58j"
+appName: vaultwarden
+services:
+  web:
+    image: vaultwarden/server:latest
+    environment:
+      DOMAIN: ${NETHERA_PUBLIC_URL}
+      SIGNUPS_ALLOWED: "false"
+    volumes:
+      - vaultwarden-data:/data
+    nethera:
+      public: 80
+      auth: none
+
+volumes:
+  vaultwarden-data:
+```
+
+Then redeploy:
+
+```bash id="adju1r"
+neth deploy
+```
+
+This leaves Vaultwarden's own login as the access layer and allows Bitwarden-compatible mobile apps, desktop apps, and browser extensions to connect normally.
+
+## Open and verify remotely
+
+Open the HTTPS endpoint from a device that isn't on the same network as the host machine; a phone on cellular data works well. Confirm that signups are disabled and that you can log in with the account you created.
+
+## Data and config notes
+
+* The `vaultwarden-data` volume holds the database, attachments, sends, icons cache, and other Vaultwarden state. It persists across redeploys as long as the volume itself isn't removed.
+* `SIGNUPS_ALLOWED` starts as `"true"` only for first account creation. Set it to `"false"` immediately after your account exists.
+* `DOMAIN` uses `NETHERA_PUBLIC_URL`, which Nethera injects automatically from the public endpoint.
+
+## Troubleshooting
+
+**Someone else creates an account before you do.** During the first setup phase, `auth: login` should prevent this unless someone else has access to your Nethera account/team. If it happens, stop the instance and reset the `vaultwarden-data` volume before storing real passwords.
+
+**Bitwarden app or browser extension cannot connect.** Check that you completed the lock-down step and changed Nethera auth to `none`. Bitwarden-compatible clients expect to talk directly to Vaultwarden and may not work through a Nethera login gate.
+
+**Vault data disappears after a redeploy.** This happens if the `vaultwarden-data` volume was removed or recreated rather than reused. Check that the volume name hasn't changed between deploys.
+
+**Links or client behaviour look wrong after changing endpoint.** Check that `DOMAIN` still uses `${NETHERA_PUBLIC_URL}`.
+
+## FAQ
+
+**Can I access Vaultwarden from my phone when I'm not on my home network?**
+Yes, that's what the public endpoint from `neth deploy` is for. Use it the same way you'd point the Bitwarden mobile app or browser extension at any self-hosted server URL.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Why start with `auth: login` and then change to `auth: none`?**
+`auth: login` protects the initial signup page while `SIGNUPS_ALLOWED` is still enabled. After your first account exists and signups are disabled, `auth: none` lets standard Bitwarden-compatible clients connect directly to Vaultwarden.
+
+**Why self-host Vaultwarden instead of using Bitwarden's hosted service?**
+So the service and encrypted vault data live on infrastructure you control instead of a third party's servers. The tradeoff historically has been the hassle of exposing a self-hosted service remotely, which Nethera removes.
+
+**Is my Vaultwarden signup page open to anyone who finds the URL?**
+Only if you leave `SIGNUPS_ALLOWED: "true"` after changing Nethera auth to `none`. In this recipe, the signup page starts behind Nethera login, and then signups are disabled before normal use.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* Keep `SIGNUPS_ALLOWED` set to `"false"` after first account creation.
+* Use `auth: none` for normal use so Bitwarden-compatible clients can connect directly.
+* Back up the `vaultwarden-data` volume; it is the only copy of your Vaultwarden server data.
+* Treat this like any password-manager deployment: use a strong master password, keep the machine patched, and back up before relying on it.

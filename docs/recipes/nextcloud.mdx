@@ -1,0 +1,178 @@
+---
+
+title: Access Nextcloud remotely with a public URL
+description: Run Nextcloud on a machine you control and use Nethera for light remote access, calendars, contacts, and occasional file sync.
+-------------------------------------------------------------------------------------------------------------------------------------------
+
+This deploys Nextcloud, including file sync, calendar, and contacts, as a Docker Compose stack with a MariaDB backend. Nethera gives it a public HTTPS endpoint automatically, without port forwarding or router configuration. See [/docs](/docs) for how Nethera works.
+
+<Callout type="warning">
+  Nextcloud can use Nethera bandwidth quickly. For heavy sync, use the LAN endpoint printed by `neth deploy` on devices that mostly stay on the same network.
+</Callout>
+
+## Why Nextcloud
+
+Nextcloud is useful when you want files, calendars, and contacts on a machine you control, but still reachable from your other devices. Nethera gives that machine a public HTTPS endpoint without port forwarding, static IPs, or dynamic DNS.
+
+This recipe is aimed at light remote access: calendars, contacts, documents, and occasional file sync. For large photo libraries, full-device sync, team file sharing, or frequent large uploads, bandwidth and storage matter. Nethera is giving your machine a public path, not turning it into unlimited cloud storage.
+
+<Callout type="info">
+  Already running Nextcloud with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent
+
+See [/docs/quickstart](/docs/quickstart) for setup of both.
+
+## nethera.yml
+
+```yaml id="9eq5a8"
+appName: nextcloud
+services:
+  web:
+    image: nextcloud:apache
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      NEXTCLOUD_TRUSTED_DOMAINS: ${NETHERA_PUBLIC_HOST} ${NETHERA_LAN_HOST}
+    volumes:
+      - nextcloud-data:/var/www/html
+    depends_on:
+      - db
+    nethera:
+      public: 80      # exposes container port 80 and issues a public HTTPS endpoint for it
+      auth: login     # protects first admin setup behind Nethera login
+      preferLan: true # redirects same-network traffic to the local address when possible
+      secrets:
+        - MYSQL_PASSWORD
+
+  db:
+    image: mariadb:11
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    environment:
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+    volumes:
+      - nextcloud-db:/var/lib/mysql
+    nethera:
+      secrets:
+        - MYSQL_PASSWORD
+        - MYSQL_ROOT_PASSWORD
+
+volumes:
+  nextcloud-data:
+  nextcloud-db:
+```
+
+Only `web` has `public: 80`, so only Nextcloud is exposed through Nethera. MariaDB stays internal to the Compose network.
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash id="bjdbp4"
+neth init
+neth secrets set MYSQL_PASSWORD
+neth secrets set MYSQL_ROOT_PASSWORD
+neth deploy
+```
+
+`neth init` prepares the Nethera metadata for the app, including the generated app identifier and target machine selection.
+
+## Open
+
+Open the HTTPS endpoint printed by `neth deploy`. Nethera will require login before Nextcloud loads. You'll land on the Nextcloud first-run setup wizard, where you create the admin account.
+
+## Lock down normal use
+
+After the admin account exists, change the service's Nethera auth to `none` if you want Nextcloud's own login and sync clients to be the only access layer:
+
+```yaml
+nethera:
+  public: 80
+  auth: none
+  preferLan: true
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+## Use local access when possible
+
+When `preferLan: true` is enabled, `neth deploy` prints a LAN endpoint when Nethera can determine one:
+
+```text id="nextcloud-lan-url"
+LAN: http://<machine-lan-ip>:<port>
+```
+
+Use that local endpoint for devices that mostly stay on the same LAN as the machine. That keeps sync traffic on your local network and avoids using Nethera bandwidth. Nethera also injects `NETHERA_LAN_HOST` and `NETHERA_LAN_URL` for services with `preferLan: true`, so this recipe includes the LAN host in `NEXTCLOUD_TRUSTED_DOMAINS`.
+
+<Callout type="info">
+  For heavy sync, configure desktop and mobile clients with the LAN endpoint printed by `neth deploy` when they mostly stay on the same network. `preferLan: true` helps browser access choose the local path when possible, but sync clients are usually more reliable with a stable server URL.
+</Callout>
+
+Use the Nethera HTTPS endpoint for devices that need access away from home, or when you need a stable public URL.
+
+## Data and config notes
+
+* `nextcloud-data` holds the Nextcloud install, config, apps, and user files.
+* `nextcloud-db` holds the MariaDB data directory.
+* Back up both volumes if you care about the data. The files and database belong together for a useful restore.
+* Database passwords are stored as Nethera secrets and injected into the containers at deploy time.
+* Use strong database passwords before deploying anything you care about.
+
+## Troubleshooting
+
+**"Access through untrusted domain" error on first load.** Check that `NEXTCLOUD_TRUSTED_DOMAINS` includes `${NETHERA_PUBLIC_HOST}`.
+
+**"Access through untrusted domain" on the LAN address.** Check that `NEXTCLOUD_TRUSTED_DOMAINS` includes `${NETHERA_LAN_HOST}` and redeploy.
+
+**Nextcloud generates `http://` links on the public endpoint.** Check that
+`APACHE_DISABLE_REWRITE_IP` is set to `"1"` and `TRUSTED_PROXIES` includes the
+Nethera WireGuard range.
+
+**The Nextcloud setup wizard asks for database details.** Use the same values from the Compose file: database user `nextcloud`, database name `nextcloud`, database host `db`, and the `MYSQL_PASSWORD` value you set with `neth secrets set MYSQL_PASSWORD`.
+
+**Large uploads or syncs are slow.** Nextcloud is moving data through the machine running the Nethera agent and that machine's internet connection. Check upload speed, disk space, and whether other sync clients are running.
+
+**Nethera bandwidth is being used faster than expected.** Check for initial syncs, photo backup, large folder sync, or multiple clients all syncing through the public endpoint. For devices on the same network as the machine, use local access where practical.
+
+## FAQ
+
+**Can I use the Nextcloud mobile app to sync from outside my home network?**
+Yes, that's what the public HTTPS endpoint is for. Point the app at the URL Nethera prints after `neth deploy`, but remember that remote sync uses Nethera bandwidth.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Should I use the Nethera URL when I'm at home?**
+Not necessarily. For devices that mostly stay on the same LAN as the machine, use `http://<machine-lan-ip>:8080` or a local hostname that points to the machine. Local access avoids public bandwidth use. For devices that need access from anywhere, the Nethera URL is more convenient.
+
+**Is this actually private if `auth: none` is set?**
+During first setup, Nethera login protects the setup wizard. After you switch to `auth: none`, Nextcloud's own authentication still sits in front of your files and account. The login page itself is reachable by anyone with the URL, so it's not hidden, just password-protected the same way any public Nextcloud instance is.
+
+**Why self-host Nextcloud instead of just using Google Drive or Dropbox?**
+Mainly data ownership and cost structure. Your files, photos, contacts, and calendar live on a machine you control instead of a third party's infrastructure, and storage is bounded by the disks you attach rather than a hosted storage tier. You are still responsible for the machine, backups, reliability, bandwidth, and any Nethera subscription.
+
+**Will this handle a whole family or team?**
+It can, but size the machine, disk, backups, internet connection, and bandwidth allowance for the workload. Nextcloud sync traffic can grow quickly with multiple users, photo uploads, and large files.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* The MariaDB command flags align the database with Nextcloud's recommended settings: `READ-COMMITTED` transaction isolation and row-based binary logging.
+* No cron container is included here, so Nextcloud's background jobs will run via AJAX page loads instead of a real cron schedule. Fine for light use, not ideal for larger instances.
+* No reverse proxy config is needed beyond the trusted-proxy and trusted-domain settings in this file. Nethera handles TLS termination.
+* Start with `auth: login` for first admin creation. Switch to `auth: none` only after the Nextcloud admin account exists.
+* Remote file sync can consume significant Nethera bandwidth. This recipe is intended for light remote access, not unlimited cloud-drive replacement.

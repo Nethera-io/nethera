@@ -1,0 +1,91 @@
+---
+title: Auth
+description: Protect Nethera endpoints with public access or Nethera login.
+---
+
+Endpoint auth is configured per public service.
+
+```yaml
+services:
+  web:
+    image: ghcr.io/acme/comfyui:latest
+    nethera:
+      public: 8188
+      auth: login
+```
+
+## Supported values
+
+`auth: none`
+
+Anyone with the URL can access the endpoint.
+
+`auth: login`
+
+Users must log in with Nethera and belong to the workspace.
+
+`auth: token`
+
+API clients must authenticate with a Nethera endpoint token.
+
+The default is `auth: none`.
+
+## Guidance
+
+Use `auth: login` for browser-based tools such as ComfyUI, Open WebUI, dashboards, and admin panels.
+
+Use `auth: token` for API-focused services such as Ollama and vLLM.
+
+Use `auth: none` only when the app is meant to be public or provides its own authentication.
+
+## Endpoint tokens
+
+When `neth deploy` sees an `auth: token` service, it checks whether the endpoint already has an active token. If it does not, the CLI asks whether you want to create one and prompts for a human-readable token name.
+
+```bash
+neth deploy
+```
+
+The secret token is printed once when it is created. Store it somewhere safe.
+
+Use it as a bearer token:
+
+```bash
+curl -H "Authorization: Bearer <token>" https://ollama-api.sg.nethera.io/api/tags
+```
+
+To skip the token prompt during deploy:
+
+```bash
+neth deploy --no-token
+```
+
+Tokens are scoped to the public service. If the service is exposed through multiple machine endpoints or a custom domain, the same token works for those endpoints because they all point at the same Nethera service.
+
+You can also manage tokens later:
+
+```bash
+neth endpoint token list
+neth endpoint token create api --name "Production client"
+neth endpoint token revoke <token-id>
+```
+
+## Who can access login-protected endpoints
+
+`auth: login` requires two things:
+
+1. The visitor signs in with a Nethera account.
+2. That account belongs to the workspace that owns the endpoint.
+
+If someone signs in but is not an authorized workspace user, Nethera shows an access denied page with the signed-in email and the endpoint hostname. They can ask the workspace owner for an invite or sign in with a different account.
+
+Inviting someone to the workspace gives them access to workspace-protected endpoints. It does not automatically make them an admin; their dashboard permissions depend on their workspace role.
+
+## How it works
+
+- browser requests to protected endpoints redirect to Nethera login;
+- API or non-browser requests receive `401`;
+- `auth: token` requests must include `Authorization: Bearer <token>`;
+- WebSockets are checked before proxying;
+- endpoint auth is enforced at the edge;
+- protected endpoint sessions use short-lived signed tokens that cover valid endpoint hostnames.

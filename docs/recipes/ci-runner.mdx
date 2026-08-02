@@ -1,0 +1,94 @@
+---
+title: Self-host a GitLab Runner with Nethera
+description: Deploy a GitLab CI runner to your own machine, registered and secret-managed through Nethera, no public endpoint required.
+---
+
+This recipe deploys a Dockerized GitLab Runner to a machine you control, registered against your GitLab instance via Nethera's secrets and post-deploy hooks. See [/docs](/docs) if you're new to Nethera.
+
+## Why a self-hosted runner
+
+The usual way to register a runner is manual: SSH into a box, run `gitlab-runner register` by hand, paste the token into a prompt (or worse, into a `.env` file that ends up in version control), and hope you remember the exact command if you ever need to rebuild the machine.
+
+With Nethera, the registration command lives in `nethera.yml` as a `postDeploy` step, and the token is pulled from `neth secrets`, not typed into a shell or committed anywhere. Rebuilding the runner is `neth deploy`, not "SSH in and remember what I did last time."
+
+## Requirements
+
+- Nethera CLI installed and a machine running the Nethera agent. See [/docs/quickstart](/docs/quickstart) if you haven't set this up.
+- A GitLab project where you have permission to create a runner.
+
+## nethera.yml
+
+```yaml
+appName: gitlab-runner
+services:
+  runner:
+    image: gitlab/gitlab-runner:latest
+    volumes:
+      - gitlab-runner-config:/etc/gitlab-runner   # persists config.toml across restarts/redeploys
+      - /var/run/docker.sock:/var/run/docker.sock # lets the runner spin up docker executor jobs
+    nethera:
+      postDeploy:
+        # runs the registration command against your GitLab instance using the secrets below
+        - gitlab-runner register --non-interactive --url "$GITLAB_URL" --token "$GITLAB_RUNNER_TOKEN" --executor docker --docker-image alpine:latest
+      secrets:
+        - GITLAB_URL          # your GitLab instance URL, e.g. https://gitlab.com
+        - GITLAB_RUNNER_TOKEN # runner authentication token issued when you create the runner in GitLab
+volumes:
+  gitlab-runner-config:
+```
+
+## Deploy
+
+First, collect the two secret values:
+
+- `GITLAB_URL` is the base URL of your GitLab instance. Use `https://gitlab.com` for GitLab.com. For self-managed GitLab, use the instance URL, such as `https://gitlab.example.com`, without a project path.
+- `GITLAB_RUNNER_TOKEN` comes from GitLab. Open your project, go to **Settings > CI/CD**, expand **Runners**, and select **Create project runner**. Configure and create the runner, then copy the authentication token shown by GitLab. It normally begins with `glrt-` and is displayed only briefly. This is not a value you generate with OpenSSL.
+
+Save the config above as `nethera.yml` in a new project directory. Replace the example token below with the token you copied, then run:
+
+```bash
+neth init
+neth secrets set GITLAB_URL "https://gitlab.com"
+neth secrets set GITLAB_RUNNER_TOKEN "glrt-YOUR_TOKEN"
+neth deploy
+```
+
+## Verify
+
+Check the runner in GitLab under Settings, CI/CD, Runners. No Nethera endpoint is created, this service doesn't need inbound access, it polls GitLab outbound.
+
+## Data and config notes
+
+- `gitlab-runner-config` persists `/etc/gitlab-runner`, including `config.toml`, so the runner stays registered across redeploys.
+- The Docker socket is mounted into the container, so runner jobs use the docker executor on the host's Docker daemon. Anything a job container can do, it can do with host Docker access.
+- Default job image is `alpine:latest`, set via `--docker-image` in the post-deploy command. Change that flag if your jobs need a different base image.
+
+## Troubleshooting
+
+- **Registration fails on deploy**: usually means `GITLAB_URL` is wrong or `GITLAB_RUNNER_TOKEN` was copied incorrectly, expired, or revoked. Create a new runner in GitLab if the original authentication token is no longer available.
+- **Runner doesn't appear in GitLab**: confirm `GITLAB_URL` points at the right instance (including scheme, `https://`), not just the project path.
+
+## FAQ
+
+**Does this runner get a public URL?**
+No. GitLab Runner doesn't need inbound access, it connects out to GitLab, so Nethera doesn't provision an endpoint for it.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Why run my own runner instead of using GitLab.com's shared runners?**
+You don't have to, but if you do, this recipe handles the runner authentication token and post-deploy command through Nethera's secrets and deploy flow instead of a manual SSH session, so redeploying or rebuilding the machine is one command.
+
+**Can I run more than one runner or use a different executor?**
+This recipe uses the docker executor. Running a different executor or multiple runners means editing the `postDeploy` command and, for multiple runners, adding another service block, that's outside what's covered here.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+- No Nethera endpoint is created for this service.
+- The container has access to the host's Docker socket, treat that as host-level access, not sandboxed.
+- The `postDeploy` command runs the registration; if you rotate the GitLab token, you'll need to update the secret and re-register.

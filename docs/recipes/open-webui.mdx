@@ -1,0 +1,138 @@
+---
+title: Self-host Open WebUI with Ollama and a public URL
+description: Deploy Open WebUI with a private Ollama model backend as a Docker Compose app with a public HTTPS endpoint, no port forwarding or static IP required.
+---
+
+This deploys Open WebUI with a private Ollama backend as a Docker Compose app and gives only the web interface a public HTTPS endpoint via Nethera, see /docs for the full introduction to how that works.
+
+<Callout type="warning">
+  This recipe starts with Nethera `auth: login` so you can safely create the first Open WebUI admin account. After that, switch Nethera auth to `none` if you want Open WebUI's own account system to be the only login layer.
+</Callout>
+
+## Why Open WebUI
+
+Open WebUI on its own only runs where you start it. Left on a home machine, it's reachable on your local network and nowhere else, which means no access from your phone, no access while traveling, and no access without VPNing back into your own house. Getting past that normally means port forwarding, dynamic DNS, or a reverse proxy you maintain yourself. Deploying it through Nethera skips that setup and gives you a stable public URL for the same instance, so the chat interface you've configured, and the history in it, is usable from anywhere without exposing your home network directly to the internet.
+
+<Callout type="info">
+  Already running Open WebUI with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+- Nethera CLI installed
+- A machine running `nethera agent`
+
+See [/docs/quickstart](/docs/quickstart) for setup of both.
+
+## nethera.yml
+
+```yaml
+appName: open-webui
+
+services:
+  web:
+    image: ghcr.io/open-webui/open-webui:0.10.2-slim
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      WEBUI_URL: ${NETHERA_PUBLIC_URL}
+      WEBUI_SESSION_COOKIE_SECURE: "true"
+      WEBUI_AUTH_COOKIE_SECURE: "true"
+      WEBUI_SESSION_COOKIE_SAME_SITE: lax
+      WEBUI_AUTH_COOKIE_SAME_SITE: lax
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    nethera:
+      public: 8080       # exposes this service's port 8080 as a public HTTPS endpoint
+      auth: login         # protects first admin signup behind Nethera login
+  ollama:
+    image: ollama/ollama:0.31.2
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+volumes:
+  open-webui:
+  ollama:
+```
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth deploy
+```
+
+## Open and verify
+
+Open the HTTPS endpoint printed by `neth deploy`. Nethera will require login before Open WebUI loads. Create the first Open WebUI account immediately; that account becomes the admin. Ollama is available to Open WebUI at `http://ollama:11434`, but it is not exposed as a public endpoint.
+
+<Callout type="info">
+  The first start can take several minutes. Open WebUI runs database migrations and downloads its default embedding model from Hugging Face before it starts listening on port 8080. During that work Docker may report the container as `unhealthy`, and the public page may show "backend disconnected".
+</Callout>
+
+After logging in, click 'Select a model -> Manage Connections -> Manage Ollama API Connections' to download a model.
+
+## Lock down normal use
+
+After the first admin account exists, change the service's Nethera auth to `none` if you want Open WebUI's own accounts to be the only access layer:
+
+```yaml
+nethera:
+  public: 8080
+  auth: none
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+## Data and config notes
+
+- The `open-webui` volume holds everything under `/app/backend/data`, including chat history, user accounts, and settings. It persists across redeploys as long as the volume isn't renamed or removed.
+- Open WebUI persists some configuration in that volume. On an existing deployment, confirm the WebUI URL in the admin settings matches the Nethera HTTPS endpoint if adding `WEBUI_URL` does not override the stored value.
+- The `ollama` volume holds downloaded models. Redeploys keep the pulled model unless the volume is removed or renamed.
+- Open WebUI's first created account becomes the admin account. This recipe keeps that first signup behind Nethera login.
+- Ollama is intentionally private. Only the Open WebUI service has `public:` configured.
+
+## Troubleshooting
+
+- **The page says "backend disconnected" and Docker reports the web container as unhealthy**: on first start, this usually means Open WebUI is still migrating its database or downloading the default embedding model. Run `docker logs -f nethera_open-webui-web-1` and look for `Fetching 30 files`; wait until `Application startup complete` appears. Then verify the backend from inside the container with `docker exec nethera_open-webui-web-1 curl -sS http://127.0.0.1:8080/health`. A healthy backend returns `{"status":true}`. If Docker's health log contains `jq: error (at <stdin>:0): break`, that is normally a secondary symptom: the health check received no JSON because the backend was not listening yet. The `open-webui` volume caches the downloaded data, so subsequent starts should be faster. Do not delete the volume while troubleshooting because it also stores accounts, settings, and chat history.
+- **Chat screen loads but no model is available**: log in as the Open WebUI admin, open `/admin/settings/connections`, and download a model for the Ollama connection. Check `neth logs --service ollama` if the download fails.
+- **Someone else's account shows up as admin**: during the initial setup phase, `auth: login` should prevent this unless someone else has access to your Nethera account/team. If it happens, reset the `open-webui` volume before storing real data.
+- **Data missing after a redeploy**: check that the volume name in your `nethera.yml` wasn't changed between deploys, Compose treats a renamed volume as a new one.
+
+## FAQ
+
+**Can I use my self-hosted Open WebUI from outside my home network, like on my phone?**
+Yes. The `public: 8080` field gives the service a stable HTTPS URL independent of your home network, so it's reachable anywhere without a VPN back to the machine it's running on.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Is this Open WebUI instance password protected?**
+During first setup, yes: Nethera login protects the initial signup. After you switch to `auth: none`, Open WebUI's own account system becomes the access layer.
+
+**Do I need Ollama running for this to work?**
+No separate Ollama install is needed. This recipe deploys Ollama as a private service in the same Compose app and points Open WebUI at it with `OLLAMA_BASE_URL`.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+- Start with `auth: login` for first admin creation. Switch to `auth: none` only after the admin account exists.
+- Ollama is not public. Do not add `public:` to the `ollama` service unless you intentionally want to expose its API.
+- The `open-webui` volume covers accounts, settings, and chat history. The `ollama` volume covers model data.

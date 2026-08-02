@@ -1,0 +1,340 @@
+---
+title: CLI
+description: Command reference for the neth CLI.
+---
+
+Install the CLI on your laptop or development machine:
+
+<InstallCliCommand />
+
+Use `neth help <command>` for the same reference in your terminal.
+
+## Help
+
+### `neth help`
+
+```bash
+neth help [command]
+```
+
+Prints the command reference. Use nested commands such as neth help endpoint token create for detailed help.
+
+Examples:
+
+```bash
+neth help
+neth help deploy
+neth help endpoint token create
+```
+
+## Auth
+
+### `neth login`
+
+```bash
+neth login [--no-browser]
+```
+
+Opens a browser login flow and stores a CLI session for the configured environment.
+
+Use `--no-browser` to print the login URL instead of opening it automatically.
+
+### `neth whoami`
+
+```bash
+neth whoami
+```
+
+Prints the current environment, API URL, user email, workspace, role, and plan.
+
+### `neth version`
+
+```bash
+neth version
+```
+
+Prints the installed CLI version, current environment, and API URL.
+
+### `neth logout`
+
+```bash
+neth logout
+```
+
+Removes the saved session token for the current environment.
+
+## Projects
+
+### `neth init`
+
+```bash
+neth init [dir]
+```
+
+Creates nethera.yml, imports or prompts for Compose content, registers the app when needed, and asks which machines should be targets.
+
+Examples:
+
+```bash
+neth init
+neth init ./my-app
+```
+
+## Deployments
+
+### `neth deploy`
+
+```bash
+neth deploy [path/to/nethera.yml] [--no-token] [--wait|--replace] [--yes] [--verbose]
+```
+
+Submits the desired nethera.yml state to Nethera and streams deployment logs from the target machine.
+
+Examples:
+
+```bash
+neth deploy
+neth deploy --verbose
+neth deploy ./nethera.yml --no-token
+```
+
+### `neth apply`
+
+```bash
+neth apply [path/to/nethera.yml] [--no-token] [--wait|--replace] [--yes] [--verbose]
+```
+
+Runs the same deployment flow as neth deploy.
+
+### `neth destroy`
+
+```bash
+neth destroy [path/to/nethera.yml] [--yes] [--verbose]
+```
+
+Submits a destroy job for the app targets in nethera.yml. Local containers are stopped by Docker Compose on the target machine.
+
+## Endpoint API Tokens
+
+### `neth endpoint`
+
+```bash
+neth endpoint token <list|create|revoke>
+```
+
+Manages endpoint API tokens for services configured with auth: token.
+
+### `neth endpoint token`
+
+```bash
+neth endpoint token <list|create|revoke>
+```
+
+Lists, creates, and revokes API tokens for services configured with auth: token.
+
+### `neth endpoint token list`
+
+```bash
+neth endpoint token list [--app <APP>] [--service <SERVICE>]
+```
+
+Lists API tokens for auth: token endpoints. The app is inferred from nethera.yml when possible.
+
+### `neth endpoint token create`
+
+```bash
+neth endpoint token create <SERVICE> [--app <APP>] [--name <NAME>] [--expires-at <ISO_TIME>]
+```
+
+Creates a named token for a service endpoint and prints the secret token once.
+
+Examples:
+
+```bash
+neth endpoint token create api --name "Production client"
+```
+
+### `neth endpoint token revoke`
+
+```bash
+neth endpoint token revoke <TOKEN_ID> [--yes]
+```
+
+Revokes an endpoint API token after confirmation unless --yes is passed.
+
+## Logs
+
+### `neth logs`
+
+```bash
+neth logs [--app <APP>] [--service <SERVICE>] [--tail <LINES>] [--machine <MACHINE>] [--deployment <DEPLOYMENT>] [--no-follow]
+```
+
+Streams recent and live Docker Compose logs through the Nethera agent. The app is inferred from nethera.yml when possible.
+
+Examples:
+
+```bash
+neth logs
+neth logs --service web --tail 200
+neth logs --machine home-gpu --no-follow
+```
+
+## Secrets
+
+### `neth secrets`
+
+```bash
+neth secrets <set|list|reveal|delete>
+```
+
+Manages app-scoped secrets. The app is inferred from nethera.yml when possible.
+
+### `neth secrets set`
+
+```bash
+neth secrets set <NAME> [VALUE] [--app <APP>] [--value <VALUE>]
+```
+
+Stores an app-scoped secret. If VALUE is omitted, the CLI prompts without echoing input.
+
+Examples:
+
+```bash
+neth secrets set API_KEY
+neth secrets set API_KEY <secret-value>
+neth secrets set API_KEY --value <secret-value>
+```
+
+### `neth secrets list`
+
+```bash
+neth secrets list [--app <APP>]
+```
+
+Lists secret names and update times. Secret values are not shown.
+
+### `neth secrets reveal`
+
+```bash
+neth secrets reveal <NAME> [--app <APP>]
+```
+
+Prints a secret value for recovery or debugging.
+
+### `neth secrets delete`
+
+```bash
+neth secrets delete <NAME> [--app <APP>] [--yes]
+```
+
+Deletes an app-scoped secret after confirmation unless --yes is passed.
+
+## Machines
+
+### `neth machine`
+
+```bash
+neth machine <list|stats|pair|select|enable|disable|deregister>
+```
+
+Lists, pairs, selects deployment targets, enables, disables, and deregisters machines in the current workspace.
+
+### `neth machine list`
+
+```bash
+neth machine list
+```
+
+Shows machine names, regions, availability, and running app summaries.
+
+### `neth machine stats`
+
+```bash
+neth machine stats
+```
+
+Prints management state, agent health, tunnel status, Docker status, deployments, CPU, memory, disk, and GPU readiness when available.
+
+### `neth machine pair`
+
+```bash
+neth machine pair <pair-code> [machine-name] [--region <REGION>]
+```
+
+Completes the pairing flow started by the agent installer.
+
+### `neth machine select`
+
+```bash
+neth machine select [dir]
+```
+
+Reopens the machine target picker and updates targets in the project's nethera.yml, including for an already initialized project.
+
+Examples:
+
+```bash
+neth machine select
+neth machine select ./my-app
+```
+
+### `neth machine enable`
+
+```bash
+neth machine enable <machine>
+```
+
+Allows Nethera to deploy, route traffic, stream logs, and manage the machine if plan limits allow it.
+
+### `neth machine disable`
+
+```bash
+neth machine disable <machine>
+```
+
+Stops Nethera from managing the machine without deregistering it or stopping local containers.
+
+### `neth machine deregister`
+
+```bash
+neth machine deregister <machine> [--cleanup-deployments] [--cleanup-wireguard] [--yes]
+```
+
+Removes the machine from Nethera management and revokes its token. Cleanup flags request local cleanup through the agent.
+
+## Usage
+
+### `neth usage`
+
+```bash
+neth usage [--month YYYY-MM]
+```
+
+Shows workspace bandwidth and request usage for the current or selected month, with byte counts formatted in KB, MB, GB, or TB.
+
+Examples:
+
+```bash
+neth usage
+neth usage --month 2026-07
+```
+
+## File Transfer
+
+### `neth copy`
+
+```bash
+neth copy <local-path> <machine>:/mnt/nethera/...
+neth copy <machine>:/mnt/nethera/... <local-path>
+```
+
+Copies files or directories between your local machine and a paired Nethera machine using the agent-coordinated copy channel.
+
+### `neth ls`
+
+```bash
+neth ls <machine>:/mnt/nethera/...
+```
+
+Shows a bounded directory listing for a path on a paired Nethera machine.

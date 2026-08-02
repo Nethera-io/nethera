@@ -1,0 +1,41 @@
+---
+title: Architecture
+description: How deploy control and runtime traffic move through Nethera.
+---
+
+Nethera has two separate paths: one for deploying and reconciling apps, and one
+for serving public HTTPS requests. The agent is part of the deploy path. It is
+not in the runtime request path.
+
+<DocsArchitectureDiagram />
+
+## Deploy control path
+
+`neth deploy` sends the app spec, managed files, and desired deployment target
+to the Nethera control plane. The control plane stores desired state, validates
+the app, tracks revisions, stores secret references, and prepares endpoint
+routing and auth configuration.
+
+The Nethera agent on your machine polls for desired state. When it receives a
+job, it fetches scoped deployment secrets, writes generated deployment files,
+binds public services to the machine's WireGuard address, and runs Docker
+Compose locally.
+
+## Runtime request path
+
+Public requests go to Nethera Edge, not to the agent. The edge terminates TLS,
+matches the hostname, enforces endpoint auth, and picks a healthy backend for
+the service.
+
+From there, the request travels over the WireGuard tunnel to the app port on
+your machine. The Docker Compose application receives the request, while its
+volumes, local databases, model caches, and files remain on the machine running
+the agent.
+
+## Why the split matters
+
+- The agent can be offline without automatically meaning traffic is down.
+- The edge uses service-port reachability to decide whether a backend can serve.
+- No inbound public ports are required on your machine.
+- Multi-machine endpoints can route across reachable service instances.
+- Local Docker volumes and bind mounts are not replicated between machines.

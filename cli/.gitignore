@@ -1,0 +1,6 @@
+bin/
+neth
+cli
+*.test
+.DS_Store
+.vscode/

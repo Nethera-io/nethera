@@ -1,0 +1,28 @@
+{
+  "title": "Recipes",
+  "pages": [
+    "index",
+    "---AI and GPUs---",
+    "open-webui",
+    "ollama",
+    "vllm",
+    "jupyter",
+    "comfyui",
+    "---Webhooks and monitoring---",
+    "n8n",
+    "plausible",
+    "uptime-kuma",
+    "---Team tools---",
+    "nocodb",
+    "docmost",
+    "ci-runner",
+    "---Personal data---",
+    "immich",
+    "nextcloud",
+    "paperless-ngx",
+    "vaultwarden",
+    "---Home and media---",
+    "home-assistant",
+    "jellyfin"
+  ]
+}

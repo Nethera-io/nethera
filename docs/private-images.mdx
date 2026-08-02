@@ -1,0 +1,56 @@
+---
+title: Private images
+description: Pull private registry images with app-scoped secret credentials.
+---
+
+Private image credentials use app-scoped secrets. The agent uses them for Docker registry authentication before pulling images.
+
+<Callout type="info">
+  <span>
+    <strong>Pro required.</strong>
+  </span>
+</Callout>
+
+```yaml
+services:
+  web:
+    image: ghcr.io/acme/private-app:latest
+    nethera:
+      imagePullCredentials:
+        - registry: ghcr.io
+          usernameSecret: GHCR_USERNAME
+          passwordSecret: GHCR_TOKEN
+```
+
+Set the secrets before deploy:
+
+```bash
+neth secrets set GHCR_USERNAME your-github-username
+neth secrets set GHCR_TOKEN ghp_...
+```
+
+Image pull credentials are used by the agent for Docker login. They are not injected into the container unless you also list them under `nethera.secrets`.
+
+The referenced secrets must exist before deploy. If either secret is missing, Nethera rejects the deployment before it reaches the agent.
+
+## Amazon ECR
+
+For ECR, store credentials that can run `docker login` for the registry. The registry value should match the image registry host:
+
+```yaml
+services:
+  web:
+    image: myreg.ecr.ap-southeast-1.amazonaws.com/private-app:latest
+    nethera:
+      imagePullCredentials:
+        - registry: myreg.ecr.ap-southeast-1.amazonaws.com
+          usernameSecret: ECR_USERNAME
+          passwordSecret: ECR_PASSWORD
+```
+
+```bash
+neth secrets set ECR_USERNAME AWS
+neth secrets set ECR_PASSWORD <password>
+```
+
+ECR passwords expire, so rotate the secret and redeploy when needed.

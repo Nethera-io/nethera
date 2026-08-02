@@ -1,0 +1,136 @@
+---
+
+title: Self-host Plausible Analytics with a public URL
+description: Deploy Plausible Analytics with Nethera and get a public HTTPS endpoint for your tracking script, no reverse proxy or DNS wrangling required.
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Nethera deploys this Plausible Compose stack to a machine you control and exposes it over HTTPS at a public URL, no static IP or router config needed. See [/docs](/docs) if you're new to Nethera.
+
+## Why Plausible
+
+The alternative to this is usually Google Analytics: free, but every visitor's data goes to Google, and you're bound by whatever data-retention and processing terms Google sets. Plausible Cloud is the other option, and it works, but it's a recurring bill for something you can run yourself.
+
+Self-hosting Plausible keeps visitor data on infrastructure you control. The catch with self-hosting analytics specifically is that the tracking script has to reach your server from the public internet, it's not optional the way it might be for an internal tool. That's the part Nethera handles: `neth deploy` gets you a real HTTPS endpoint without you setting up a reverse proxy, TLS certs, or exposing your home network to do it.
+
+<Callout type="info">
+  Already running Plausible with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent ([setup guide](/docs/quickstart))
+
+## nethera.yml
+
+```yaml
+appName: plausible
+services:
+  plausible:
+    image: ghcr.io/plausible/community-edition:v3.2.0
+    command: sh -c "/entrypoint.sh db createdb && /entrypoint.sh db migrate && /entrypoint.sh run"
+    environment:
+      BASE_URL: ${NETHERA_PUBLIC_URL}
+      DATABASE_URL: postgres://postgres:postgres@db:5432/plausible
+      CLICKHOUSE_DATABASE_URL: http://clickhouse:8123/plausible
+    volumes:
+      - plausible-data:/var/lib/plausible
+    depends_on:
+      - db
+      - clickhouse
+    nethera:
+      public: 8000     # exposes this service's port 8000 over HTTPS at a Nethera-issued public URL
+      auth: login      # protects first admin setup behind Nethera login
+      secrets:
+        - SECRET_KEY_BASE
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: plausible
+    volumes:
+      - plausible-db:/var/lib/postgresql/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12-alpine
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    volumes:
+      - plausible-clickhouse:/var/lib/clickhouse
+
+volumes:
+  plausible-data:
+  plausible-db:
+  plausible-clickhouse:
+```
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth secrets set SECRET_KEY_BASE "$(openssl rand -hex 64)"
+neth deploy
+```
+
+Nethera injects `NETHERA_PUBLIC_URL` into the deployment env file, so Plausible gets its public `BASE_URL` during the first deploy.
+
+## Open
+
+Open the HTTPS endpoint printed by `neth deploy`. Nethera will require login before Plausible loads. Plausible's setup screen walks you through creating the first admin account.
+
+## Lock down normal use
+
+After the first admin account exists, change the service's Nethera auth to `none` so public tracking script and event requests can reach Plausible directly:
+
+```yaml
+nethera:
+  public: 8000
+  auth: none
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+## Data and config notes
+
+* `SECRET_KEY_BASE` is stored as a Nethera secret and injected into the Plausible container at deploy time.
+* `BASE_URL` uses `NETHERA_PUBLIC_URL`, which Nethera injects automatically from the public endpoint.
+* Site data, Postgres data, and ClickHouse data are on three separate named volumes. All three need to persist for the app to keep working across redeploys.
+
+## Troubleshooting
+
+* **Migration fails on first deploy with a database connection error**: `depends_on` controls start order, not readiness. If Postgres or ClickHouse hasn't finished initializing before the `plausible` container runs its migration command, it'll fail. Retry the deploy; the databases will be ready on the second pass.
+* **App loads but links point to the wrong domain**: check that `BASE_URL` is still set to `${NETHERA_PUBLIC_URL}` in `nethera.yml`.
+* **Deploy succeeds but Plausible won't start, citing `SECRET_KEY_BASE`**: the secret wasn't set. Run `neth secrets set SECRET_KEY_BASE` and redeploy.
+
+## FAQ
+
+**Do I need a domain name to access Plausible after deploying?**
+No. `neth deploy` gives you a working HTTPS URL directly. You can point a custom domain at it later if you want, but it's not required to get started.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want a service that needs to receive inbound calls from outside your network. `auth: login` still gates who's let through if you want that.
+
+**Why self-host Plausible instead of just using Google Analytics?**
+The main reason is data ownership: visitor data stays on your server instead of going to Google. The tradeoff is you're responsible for running it, which is what Nethera is handling here.
+
+**Will I lose my analytics data if I redeploy or restart the machine?**
+No, as long as the three volumes (`plausible-data`, `plausible-db`, `plausible-clickhouse`) aren't deleted. Data lives in Postgres and ClickHouse, not in the container.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* Start with `auth: login` for first admin creation. Switch to `auth: none` after setup so the tracking script and event API can be reached publicly.
+* The image tag is pinned to `v3.2.0`. Bump it deliberately rather than tracking `latest`.
+* ClickHouse is memory-hungry; make sure the machine running the Nethera agent has enough RAM for it, not just disk space.
+* The Postgres password shown here is only reachable inside the Compose network in this recipe. Change it if you adapt the stack or expose the database elsewhere.

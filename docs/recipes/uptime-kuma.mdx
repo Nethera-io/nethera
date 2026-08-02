@@ -1,0 +1,107 @@
+---
+
+title: Self-host Uptime Kuma with a public URL
+description: Deploy Uptime Kuma with Nethera and get a public HTTPS dashboard and status page, no router config, port forwarding, or static IP needed.
+------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Nethera deploys your Docker Compose app to a machine you control and gives it a public HTTPS endpoint, no static IP, port forwarding, or router config. Full introduction: [/docs](/docs).
+
+## Why Uptime Kuma
+
+Uptime Kuma's dashboard and status pages are only useful to someone else if they can actually reach them. A public status page, a teammate checking the dashboard remotely, or an external service pinging Kuma directly, all of that requires the instance to have a real URL, not just a private LAN address.
+
+The alternative is a hosted status/uptime SaaS like UptimeRobot or Better Uptime, which works, but puts your incident history on someone else's servers and usually caps checks or retention on a free tier. Self-hosting keeps that data yours. The part that's usually painful is exposing a self-hosted monitoring tool safely, that's what Nethera removes here, not the monitoring itself.
+
+<Callout type="info">
+  Already running Uptime Kuma with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent
+* Setup for both: [/docs/quickstart](/docs/quickstart)
+
+## nethera.yml
+
+```yaml
+appName: uptime-kuma
+services:
+  web:
+    image: louislam/uptime-kuma:2
+    volumes:
+      - uptime-kuma-data:/app/data
+    nethera:
+      public: 3001         # exposes container port 3001 (Kuma's web UI) over a public HTTPS endpoint
+      auth: login           # protects first admin setup behind Nethera login
+volumes:
+  uptime-kuma-data:
+```
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth deploy
+```
+
+## Open
+
+Open the HTTPS endpoint printed by `neth deploy`. Nethera will require login before Uptime Kuma loads. On first load, Uptime Kuma will prompt you to create an admin account.
+
+## Lock down normal use
+
+After the admin account exists, change the service's Nethera auth to `none` if you want public status pages to be reachable without a Nethera login:
+
+```yaml
+nethera:
+  public: 3001
+  auth: none
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+## Data and config notes
+
+* Monitors, notification settings, and the admin account all live in the SQLite database under `/app/data`, backed by the `uptime-kuma-data` volume. Removing the volume wipes all of it.
+* Status pages you create in Kuma are served from the same public endpoint, no separate exposure step needed.
+
+## Troubleshooting
+
+* **Endpoint loads blank or errors right after deploy**: the container is still initializing its SQLite database on first boot. Wait a few seconds and reload.
+* **Lost your monitors after a redeploy**: check that the `uptime-kuma-data` volume wasn't recreated or renamed. Kuma has no external database in this recipe; everything lives in that volume.
+
+## FAQ
+
+**Can I access my Uptime Kuma dashboard from outside my home network?**
+Yes, that's what the Nethera public endpoint is for. There's no port forwarding or router setup involved, the URL from `neth deploy` works from anywhere.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want a public status page anyone can check. `auth: login` still gates who's let through if you want that.
+
+**Why self-host Uptime Kuma instead of using a hosted status page service?**
+Mainly data ownership and no check limits. Hosted tools store your uptime history and status pages on their infrastructure, and free tiers often cap history length or check frequency. Self-hosting keeps the data on your machine, you just need it publicly reachable, which is what this deploy handles.
+
+**Is it safe to expose Uptime Kuma with `auth: none`?**
+During first setup, Nethera login protects the admin creation screen. After you switch to `auth: none`, Uptime Kuma's own account system gates the dashboard and monitor config, while public status pages can be reachable without Nethera login.
+
+**Should I use `auth: login` instead?**
+Use `auth: none` if you want public status pages to be reachable without a Nethera login. Use `auth: login` if this is only an internal monitoring dashboard and everyone who needs access has a Nethera account.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* Start with `auth: login` for first admin creation. Switch to `auth: none` only after the admin account exists and only if you want public status pages.
+* Public status pages you build in Kuma are visible to anyone with the URL by design, that's separate from the dashboard/login concern above.
+* All persistent state is in the `uptime-kuma-data` volume; there's no separate database service to back up.
+* If you later enable Docker-container monitoring by mounting the Docker socket, be careful: that gives the container privileged access to the Docker daemon and is not recommended for casually exposed public deployments.

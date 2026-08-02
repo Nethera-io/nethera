@@ -1,0 +1,157 @@
+---
+title: Uninstalling Nethera
+description: Remove Nethera from a workspace or from a Linux machine safely.
+---
+
+Uninstalling Nethera has two separate parts:
+
+- remove the machine from Nethera so endpoints and management stop;
+- optionally remove the agent software and local deployment files from the Linux host.
+
+Removing a machine from Nethera does not stop or delete local containers unless you explicitly request cleanup.
+
+## Full local uninstall
+
+On a machine with the agent installed, the simplest local cleanup path is:
+
+```bash
+sudo nethera-agent uninstall
+```
+
+The uninstall command stops and removes the systemd service, removes the agent binary and local Nethera state, and deregisters the machine with the backend when it can. If you want to inspect or perform each step yourself, use the manual steps below.
+
+## 1. Deregister the machine
+
+From a signed-in machine with the Nethera CLI:
+
+```bash
+neth machine deregister home-gpu
+```
+
+This disables public endpoints for the machine, revokes the machine token, removes it from active Nethera management, and stops it counting toward active managed machine limits.
+
+Existing containers, Docker volumes, and files on the host are left alone.
+
+## Optional cleanup during removal
+
+If the agent is still reachable and you want Nethera to ask it to clean up local Nethera-managed state, use:
+
+```bash
+neth machine deregister home-gpu --cleanup-deployments --cleanup-wireguard
+```
+
+`--cleanup-deployments` requests cleanup of Nethera-managed Compose projects.
+
+`--cleanup-wireguard` requests cleanup of Nethera-managed WireGuard configuration if the agent supports it.
+
+Use these flags only when you want Nethera to touch local runtime state. They are not required for normal deregistration.
+
+<Callout type="warning">
+  If the machine is offline, cleanup cannot run immediately. Deregistration still disables Nethera endpoints and revokes the machine token.
+</Callout>
+
+## 2. Stop the agent service
+
+Run these commands on the Linux machine that has the agent installed:
+
+```bash
+sudo systemctl stop nethera-agent
+sudo systemctl disable nethera-agent
+```
+
+Check that it is stopped:
+
+```bash
+sudo systemctl status nethera-agent
+```
+
+## 3. Remove the systemd service
+
+```bash
+sudo rm -f /etc/systemd/system/nethera-agent.service
+sudo systemctl daemon-reload
+sudo systemctl reset-failed nethera-agent
+```
+
+## 4. Remove the agent binary
+
+```bash
+sudo rm -f /usr/local/bin/nethera-agent
+sudo rm -f /usr/local/bin/nethera-agent.previous
+```
+
+## 5. Remove Nethera config and state
+
+Nethera stores machine credentials and agent configuration under `/etc/nethera`, and deployment state under `/var/lib/nethera`.
+
+Remove them only after deregistering the machine:
+
+```bash
+sudo rm -rf /etc/nethera
+sudo rm -rf /var/lib/nethera
+sudo rm -rf /var/log/nethera
+```
+
+This removes local Nethera machine credentials, deployment metadata, generated Compose files, managed files, and agent logs.
+
+It does not remove Docker images, containers, named volumes, or host directories that your apps use.
+
+## 6. Decide what to do with Docker workloads
+
+Nethera deployments are normal Docker Compose projects on the machine. If you deregistered without cleanup, the containers may still be running locally.
+
+To inspect running containers:
+
+```bash
+docker ps
+```
+
+To inspect Compose projects:
+
+```bash
+docker compose ls
+```
+
+Nethera-generated Compose projects usually use project names derived from the app or deployment, often prefixed with `nethera_`.
+
+If you want to stop a specific project yourself:
+
+```bash
+docker compose -p <project-name> down
+```
+
+Add `-v` only if you intentionally want to remove that project’s Docker named volumes:
+
+```bash
+docker compose -p <project-name> down -v
+```
+
+<Callout type="warning">
+  `docker compose down -v` deletes Docker named volumes for that Compose project. Do not use it if you want to keep databases, uploads, models, or app state.
+</Callout>
+
+## 7. Remove Docker or WireGuard tools
+
+The Nethera agent installer may install Docker Engine, the Docker Compose plugin, and WireGuard tools on supported Debian or Ubuntu systems.
+
+Do not remove them if other software on the machine uses them.
+
+If the machine was dedicated to Nethera and you want to remove them manually, use your operating system’s package manager. On Debian or Ubuntu this is usually done with `apt`.
+
+## If you only want to stop paying for a machine
+
+You do not need to uninstall the agent.
+
+Use either:
+
+```bash
+neth machine disable home-gpu
+```
+
+or:
+
+```bash
+neth machine deregister home-gpu
+```
+
+Disabling management is reversible. Deregistration removes the machine from Nethera and requires pairing again if you want to use it later.

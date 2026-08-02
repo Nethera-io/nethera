@@ -1,0 +1,163 @@
+---
+
+title: Access Jellyfin remotely with a public URL
+description: Keep Jellyfin streaming locally on your LAN, with a Nethera HTTPS endpoint for occasional remote access.
+---------------------------------------------------------------------------------------------------------------------
+
+This recipe deploys Jellyfin as a Docker Compose app on a machine you control and gives it a public HTTPS endpoint through Nethera. See [/docs](/docs) for the full introduction to Nethera.
+
+<Callout type="warning">
+  Jellyfin is a media streaming app, so remote use can consume significant bandwidth. Use the public Nethera URL for occasional remote access, not as the default path for devices on the same LAN. When you're at home, connect to Jellyfin over the local network instead.
+</Callout>
+
+## Why deploy Jellyfin this way
+
+Jellyfin is at its best on your local network. TVs, phones, and laptops at home should connect directly to the machine running Jellyfin, so streams stay on the LAN and don't use public bandwidth.
+
+This recipe adds a second path: a public HTTPS endpoint for occasional remote access when you're away from home. That avoids port forwarding, dynamic DNS, and CGNAT problems, while keeping normal viewing local.
+
+<Callout type="info">
+  Already running Jellyfin with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent
+
+See [/docs/quickstart](/docs/quickstart) for setup of both.
+
+## nethera.yml
+
+```yaml
+appName: jellyfin
+services:
+  web:
+    image: jellyfin/jellyfin:latest
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+      - /mnt/nethera/jellyfin/media:/media
+    nethera:
+      public: 8096   # exposes Jellyfin's web port over a public HTTPS endpoint
+      auth: login    # protects first admin setup behind Nethera login
+      preferLan: true # redirects same-network traffic to the local address when possible
+
+volumes:
+  jellyfin-config:
+  jellyfin-cache:
+```
+
+Devices on your LAN can connect to the machine directly, while Nethera provides a separate public HTTPS endpoint for remote access.
+
+Only Jellyfin's web port is exposed through Nethera. The media files themselves stay on the machine running the agent.
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth deploy
+```
+
+`neth init` prepares the Nethera metadata for the app, including the generated app identifier and target machine selection.
+
+## Copy your media
+
+After deploying, copy a local media directory to the machine, replacing `home-server` with the name of your Nethera machine:
+
+```bash
+neth copy ./media home-server:/mnt/nethera/jellyfin/media
+```
+
+See [File transfer](/docs/file-transfer) for more examples, including copying files back from a machine and listing remote directories.
+
+## Open locally
+
+When you're on the same network as the machine, use Jellyfin's local address:
+
+```text
+http://<machine-lan-ip>:8096
+```
+
+Use this local address for TVs, phones, tablets, and laptops at home. Local playback avoids public bandwidth and is the normal way to use Jellyfin on your own network.
+
+## Open remotely
+
+When you're away from home, open the HTTPS endpoint printed by `neth deploy`.
+
+Use the public Nethera URL for occasional remote access, for example while travelling or checking your library from another network. Avoid using it as the default server address for devices that normally stay on the same LAN as the Jellyfin machine.
+
+On first visit you'll land on Jellyfin's setup wizard, not a login screen, since this is a fresh instance. Nethera will require login before Jellyfin loads. Create your admin account there.
+
+## Lock down normal use
+
+After the admin account exists, change the service's Nethera auth to `none` if you want Jellyfin's own accounts and clients to be the only access layer:
+
+```yaml
+nethera:
+  public: 8096
+  auth: none
+  preferLan: true
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+## Data and config notes
+
+* `jellyfin-config` and `jellyfin-cache` are Docker named volumes and will persist across redeploys as long as you don't delete them.
+* `/mnt/nethera/jellyfin/media` is an absolute path on the machine running the Nethera agent. Put your media files there, or change the path to an existing media directory on that machine before deploying.
+* No GPU or video device is passed through in this Compose file, so hardware transcoding is not configured. Transcodes will use CPU unless you add the relevant device or runtime configuration for your hardware.
+* Direct play of compatible media is much lighter than transcoding. If remote playback is slow, try using media formats your client can play directly.
+* `preferLan: true` prints a LAN endpoint on deploy when Nethera can detect it. If a Jellyfin mobile or TV app struggles with automatic LAN redirects, either set `preferLan: false` and redeploy, or register that app with only the local endpoint for LAN-only use.
+
+## Troubleshooting
+
+**Library is empty after deploy.** Check that your media files are actually present at `/mnt/nethera/jellyfin/media` on the machine running the agent, or change the bind mount to point at the directory where your media already lives.
+
+**Playback works locally but stutters remotely.** Remote streaming depends on the upload speed of the machine's internet connection, the download speed of the client connection, and whether Jellyfin needs to transcode the file. Try direct-playing a lower-bitrate file first.
+
+**Playback stutters or transcoding is slow.** No hardware acceleration is configured here. Anything that needs transcoding is running on CPU unless you add the relevant hardware acceleration configuration.
+
+**Endpoint loads but shows the setup wizard again after you already configured it.** Usually means `jellyfin-config` didn't persist. Check that the volume wasn't recreated or removed between deploys.
+
+**I can connect through the public URL but not locally.** Make sure you're using the machine's LAN IP address and port `8096`, for example `http://192.168.1.50:8096`. Also check that the machine's local firewall allows connections to Jellyfin from other devices on the LAN.
+
+## FAQ
+
+**Can I watch my Jellyfin library when I'm not on my home Wi-Fi?**
+Yes, that's what the public endpoint from `neth deploy` is for. Use it when you're away from home and need remote access.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Should I use the public URL when I'm at home?**
+No. At home, use the local Jellyfin address on your LAN. That keeps streams local and avoids unnecessary public bandwidth.
+
+**Why not just forward a port on my router instead of using Nethera?**
+You can, if your ISP gives you a public IP and you want to manage router configuration yourself. Many residential, mobile, and fixed-wireless connections sit behind CGNAT, which makes port forwarding a dead end regardless of router config. Nethera's agent sidesteps that.
+
+**Do I need to add a password or login before deploying?**
+During first setup, Nethera login protects Jellyfin's setup wizard. Jellyfin's setup wizard is where you create the admin login.
+
+**Can anyone with the URL watch my media?**
+No, the URL alone doesn't grant access to the library. Jellyfin's own accounts still control access. After you switch to `auth: none`, anyone with the URL can reach the Jellyfin login page.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* Start with `auth: login` for first admin creation. Switch to `auth: none` only after Jellyfin's admin account exists.
+* Use the local LAN address for normal home viewing.
+* Use the Nethera HTTPS endpoint sparingly for remote access.
+* The media directory needs to exist on the machine running the agent, and it needs to contain your media files.
+* No hardware transcoding is configured in this file, so expect CPU-only transcodes.
+* Remote streaming can use significant bandwidth, especially with high-bitrate or 4K media.

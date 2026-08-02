@@ -1,0 +1,141 @@
+---
+title: Self-host Docmost with a public URL
+description: Deploy Docmost, a self-hosted Notion/Confluence alternative, and get an HTTPS link your team can open immediately, no VPN or port forwarding required.
+---
+
+Deploy Docmost, a self-hosted wiki and document collaboration tool, with a public HTTPS endpoint your team can reach directly. See [/docs](/docs) if you want the full introduction to Nethera first.
+
+<Callout type="warning">
+  This recipe starts with Nethera `auth: login` so you can safely create the first Docmost admin account. After that, switch Nethera auth to `none` if you want Docmost's own login to be the only access layer.
+</Callout>
+
+## Why Docmost on Nethera
+
+Docmost is a team tool. It's only useful if the people you're writing docs for can actually open it. Self-hosted on a machine with no remote access, it's a wiki only you can read, which defeats the point. The usual fix is exposing it yourself with port forwarding and a reverse proxy, which means you're now responsible for the TLS cert, the open port, and whatever else is reachable on that box.
+
+Nethera skips that tradeoff. The container gets a public HTTPS endpoint without you touching your router or terminating TLS yourself, so the team gets remote access on day one and you're not the one holding the exposed port.
+
+<Callout type="info">
+  Already running Docmost with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+- Nethera CLI installed
+- A machine running the Nethera agent
+
+See [/docs/quickstart](/docs/quickstart) for setup if you haven't done this yet.
+
+## nethera.yml
+
+```yaml
+appName: docmost
+services:
+  docmost:
+    image: docmost/docmost:latest
+    environment:
+      APP_URL: ${NETHERA_PUBLIC_URL}
+      DATABASE_URL: postgresql://docmost:docmost@db:5432/docmost
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - docmost-data:/app/data/storage
+    depends_on:
+      - db
+      - redis
+    nethera:
+      public: 3000        # exposes container port 3000 on a public HTTPS endpoint
+      auth: login         # protects first admin setup behind Nethera login
+      secrets:
+        - APP_SECRET      # injected at deploy time from Nethera secrets, not stored in this file
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: docmost
+      POSTGRES_USER: docmost
+      POSTGRES_PASSWORD: docmost
+    volumes:
+      - docmost-db:/var/lib/postgresql
+  redis:
+    image: redis:8
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - docmost-redis:/data
+volumes:
+  docmost-data:
+  docmost-db:
+  docmost-redis:
+```
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth secrets set APP_SECRET "$(openssl rand -hex 32)"
+neth deploy
+```
+
+Nethera injects `NETHERA_PUBLIC_URL` into the deployment env file, so Docmost gets its public `APP_URL` during the first deploy.
+
+## Open and verify
+
+Open the HTTPS endpoint printed by `neth deploy`. Nethera will require login before Docmost loads. You should land on the Docmost setup/login screen. Create your admin account there.
+
+## Lock down normal use
+
+After the first admin account exists, change the service's Nethera auth to `none` if you want Docmost's own login to be the only access layer:
+
+```yaml
+nethera:
+  public: 3000
+  auth: none
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+## Data and config notes
+
+- `APP_URL` uses `NETHERA_PUBLIC_URL`, which Nethera injects automatically from the public endpoint.
+- `APP_SECRET` isn't in the yaml. Set it with `neth secrets set APP_SECRET` before the first deploy, it's injected into the container at deploy time.
+- Document storage lives in the `docmost-data` volume, database in `docmost-db`, queue/cache state in `docmost-redis`. Back up all three if you're migrating.
+- Redis is started with `--maxmemory-policy noeviction`, which Docmost's background job queue depends on. Don't remove that flag.
+
+## Troubleshooting
+
+**Blank page or redirect loop after logging in.** Check that `APP_URL` still uses `${NETHERA_PUBLIC_URL}`.
+
+**`docmost` container restarts a few times right after `neth deploy`.** `depends_on` starts the container alongside `db` and `redis`, not after they're ready to accept connections. It should stabilize once Postgres and Redis finish booting; if it doesn't, check that both are healthy.
+
+**Login fails or sessions behave strangely.** `APP_SECRET` wasn't set before deploy. Run `neth secrets set APP_SECRET` and redeploy.
+
+**`neth deploy` fails complaining about a missing secret.** You deployed before running `neth secrets set APP_SECRET`. Set it, then deploy again.
+
+## FAQ
+
+**Can my whole team access Docmost remotely without setting up a VPN?**
+Yes. The endpoint Nethera gives you is public HTTPS, so anyone with the link can reach it, same as any other website.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Why self-host Docmost instead of using Notion or Confluence?**
+The tradeoff most people hit with self-hosting a team wiki is that it's only reachable on your own network unless you expose it yourself. Nethera gives you the public endpoint without you managing the open port, so you get self-hosted data with the reachability of a SaaS tool.
+
+**Where does Docmost store its data, and can I move it later?**
+Documents go in the `docmost-data` volume, the database in `docmost-db`, and queue state in `docmost-redis`. All three are named Docker volumes, so you can back them up or move them the same way you would any Compose deployment.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+- Start with `auth: login` for first admin creation. Switch to `auth: none` only after the admin account exists.
+- Database credentials in this file (`docmost` / `docmost`) are placeholders, not safe defaults, even though `APP_SECRET` itself is handled properly via Nethera secrets.
+- Don't remove the Redis `noeviction` flag, Docmost's queue relies on it.

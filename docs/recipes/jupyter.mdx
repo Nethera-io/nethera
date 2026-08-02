@@ -1,0 +1,112 @@
+---
+
+title: Self-host JupyterLab with a public URL
+description: Deploy JupyterLab with Nethera and reach it from any device over HTTPS, protected by Nethera login instead of a public Jupyter token URL.
+------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Nethera deploys this Compose file to a machine you control and gives JupyterLab a public HTTPS endpoint, no port forwarding or router config needed. See [/docs](/docs) for the full introduction.
+
+## Why JupyterLab
+
+The usual way to get a Jupyter environment you can reach from anywhere is a hosted service, such as Colab or a managed JupyterHub, where the environment and packages aren't fully yours. The other common option is exposing a local notebook server with `--ip=0.0.0.0` and a URL tunnel, which puts Jupyter's own token URL, or no auth at all, directly on the internet.
+
+This recipe disables Jupyter's built-in token (`--IdentityProvider.token=''`) and puts `nethera auth: login` in front of it instead. You get a notebook environment that's actually yours, reachable remotely, gated by Nethera login rather than a token sitting in a URL.
+
+<Callout type="warning">
+  This recipe disables Jupyter's built-in token and relies on `auth: login`. Do not remove or weaken the Nethera auth setting unless you also restore Jupyter's own authentication.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent
+
+See [/docs/quickstart](/docs/quickstart) for setup of both.
+
+## nethera.yml
+
+```yaml
+appName: jupyter
+services:
+  notebook:
+    image: quay.io/jupyter/base-notebook:latest
+    command: start-notebook.py --IdentityProvider.token=''
+    volumes:
+      - jupyter-work:/home/jovyan/work
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    nethera:
+      public: 8888          # exposes container port 8888 as a public HTTPS endpoint
+      auth: login           # gates that endpoint behind Nethera login instead of Jupyter's own token
+
+volumes:
+  jupyter-work:
+```
+
+Only the Jupyter service has a `nethera:` block, so it is the only service exposed through Nethera.
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth deploy
+```
+
+`neth init` prepares the Nethera metadata for the app, including the generated app identifier and target machine selection.
+
+## Open and verify
+
+Open the HTTPS endpoint printed by `neth deploy`. You'll be prompted for Nethera login before JupyterLab loads.
+
+Create or save notebooks under `/home/jovyan/work` if you want them to survive redeploys.
+
+## Data and config notes
+
+Only `/home/jovyan/work` is on a named volume (`jupyter-work`), so notebooks and files saved there survive redeploys on the same machine. Anything written outside that path does not persist if the container is recreated.
+
+Packages installed into the container's default environment also do not persist across container recreation. For repeatable environments, build a custom image, use a project-local environment under `/home/jovyan/work`, or keep environment setup commands in your notebook or project.
+
+## Troubleshooting
+
+**Notebooks are missing after a redeploy.** Check where they were saved. Only files under `/home/jovyan/work` are backed by the `jupyter-work` volume.
+
+**Installed packages are missing after a redeploy.** Packages installed into the container's default environment are not stored in `jupyter-work`. Use a custom image or recreate the environment from your project.
+
+**The endpoint loads without asking for Nethera login.** Stop and check the `nethera:` block. This recipe relies on `auth: login` because Jupyter's own token is disabled.
+
+## FAQ
+
+**Can I access JupyterLab from another device, not just the machine running it?**
+Yes. `nethera: public: 8888` gives it an HTTPS endpoint, so any device can reach it once you're logged in.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Do I still need Jupyter's own token if I'm using Nethera login?**
+No. This config turns Jupyter's token off (`--IdentityProvider.token=''`) on purpose. Access control is handled by `nethera auth: login`.
+
+**Will my notebooks be there if I redeploy?**
+Yes, if they are saved under `/home/jovyan/work` and the `jupyter-work` volume is still present on the same machine.
+
+**Will my notebooks follow the app to a different machine?**
+No. Named volumes live on the machine where they were created. To move machines, copy or back up the contents of `jupyter-work`.
+
+**Can users run commands inside the notebook environment?**
+Yes. Anyone who can access JupyterLab can run notebook code and may be able to open a terminal inside the container. Treat access to this endpoint as access to the notebook environment itself.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* Jupyter's token auth is disabled in this config; access relies entirely on `nethera auth: login`.
+* If `auth: login` is removed or misconfigured, the notebook may be exposed with no authentication.
+* Anyone who logs in has full notebook access, including code execution inside the container.
+* Only `/home/jovyan/work` persists across redeploys on the same machine.

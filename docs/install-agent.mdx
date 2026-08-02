@@ -1,0 +1,34 @@
+---
+title: Install the agent
+description: Install the Nethera agent on a Linux machine you want to deploy apps to.
+---
+
+The Nethera agent runs on the Linux machine that will host your containers. It connects outbound to Nethera, receives deploy requests, and manages Nethera-created Compose projects.
+
+## Install
+
+Run this on the target Linux machine:
+
+<InstallAgentCommand />
+
+The installer installs Docker and WireGuard tools where supported, installs `nethera-agent`, creates required Nethera directories, and starts the systemd service.
+
+## Pairing
+
+After install, the agent initiates pairing and prompts you to attach the machine to your Nethera workspace. Follow the displayed link or code.
+
+## What the agent does
+
+- polls Nethera for deploy and management work;
+- writes deployment files under `/var/lib/nethera`;
+- runs Nethera-managed Docker Compose projects;
+- configures Nethera-managed network state when machine configuration is available.
+
+The agent does not require inbound public ports.
+
+## Check status
+
+```bash
+sudo systemctl status nethera-agent
+sudo journalctl -u nethera-agent -f
+```

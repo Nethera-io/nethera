@@ -1,0 +1,138 @@
+---
+title: Self-host Home Assistant with a public URL
+description: Deploy Home Assistant with Nethera and get a public HTTPS endpoint for remote access, no port forwarding, dynamic DNS, or router config.
+---
+
+This recipe deploys Home Assistant as a Docker Compose service and gives it a public HTTPS endpoint through Nethera, no router config or port forwarding involved. See [/docs](/docs) for the full introduction to Nethera.
+
+## Why this instead of Nabu Casa or DIY port forwarding
+
+Home Assistant runs locally by design. Remote access is normally solved one of two ways: pay for Nabu Casa (Home Assistant Cloud), which bundles a remote URL with Alexa and Google Assistant integration, or expose your home router yourself with port forwarding, dynamic DNS, and your own reverse proxy and TLS.
+
+Nethera gets you the public endpoint part without touching your router or paying for a subscription tied to remote access specifically. If you're using Nabu Casa for the Alexa/Google integration, this doesn't replace that, it's for people who just want a URL to reach their HA instance from outside their network.
+
+<Callout type="info">
+  Already running Home Assistant with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+- Nethera CLI installed
+- A machine running the Nethera agent (see [/docs/quickstart](/docs/quickstart) for setup)
+- Docker and Compose familiarity assumed
+
+## nethera.yml
+
+```yaml
+appName: home-assistant
+services:
+  web:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - home-assistant-config:/config
+    network_mode: host          # required for HA's local network discovery (mDNS, HomeKit, etc.)
+    nethera:
+      public: 8123               # exposes port 8123 as a public HTTPS endpoint
+      auth: login                # protects first admin setup behind Nethera login
+      preferLan: true            # redirects same-network traffic to the local address when possible
+      files:
+        configuration.yaml:
+          source: ./configuration.yaml
+          target: /config/configuration.yaml
+          mode: "0644"
+volumes:
+  home-assistant-config:
+```
+
+Create `configuration.yaml` in the same directory:
+
+```yaml
+default_config:
+
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 10.100.0.1
+    - 10.110.0.1
+```
+
+[Home Assistant requires reverse proxies to be explicitly trusted](https://www.home-assistant.io/integrations/http/#reverse-proxies) before it accepts forwarded requests.
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth deploy
+```
+
+## Open and verify
+
+Open the HTTPS endpoint printed by `neth deploy`. Nethera will require login before Home Assistant loads. On first load you'll hit Home Assistant's onboarding wizard to create the admin account, this is standard HA behavior, not specific to this deploy.
+
+## Lock down normal use
+
+After the admin account exists, change the service's Nethera auth to `none` if you want Home Assistant's own login and mobile app flow to be the only access layer:
+
+```yaml
+nethera:
+  public: 8123
+  auth: none
+  preferLan: true
+  files:
+    configuration.yaml:
+      source: ./configuration.yaml
+      target: /config/configuration.yaml
+      mode: "0644"
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+## Data and config notes
+
+- Config lives in the `home-assistant-config` volume, mounted at `/config`. This is where HA stores its config files, database, and any manually added integrations.
+- The managed `configuration.yaml` enables Home Assistant's default integrations and trusts Nethera's reverse proxies. If you customize this file later, keep the `http` settings shown above.
+- `network_mode: host` means the container shares the host machine's network directly rather than sitting on an isolated Compose network. This is why local device discovery works, and also why the container will fail to start if something else on the host is already bound to port 8123.
+- Start with `auth: login` for onboarding. Switch to `auth: none` only after the Home Assistant admin account exists.
+- `preferLan: true` prints a LAN endpoint on deploy when Nethera can detect it. If the Home Assistant companion app struggles with automatic LAN redirects, either set `preferLan: false` and redeploy, or register the app with only the local endpoint for LAN-only use.
+
+## Troubleshooting
+
+**Endpoint returns nothing right after deploy.** Home Assistant takes 30-60 seconds to finish starting on first boot. Wait and retry before assuming something's wrong.
+
+**Home Assistant logs say the HTTP integration is not set up for reverse proxies.** Confirm that `configuration.yaml` contains the `use_x_forwarded_for` and `trusted_proxies` settings above, then redeploy. If the log names a different proxy address, add that exact address to `trusted_proxies`.
+
+**Container fails to start.** With `network_mode: host`, HA will fail to bind if port 8123 is already in use on the host. Check what's listening on that port before redeploying.
+
+**Integrations that rely on local discovery aren't finding devices.** Confirm the container actually has `network_mode: host` applied and isn't running on an isolated network, that setting is what makes mDNS/UDP-based discovery work.
+
+## FAQ
+
+**Can I access Home Assistant when I'm away from home, without a VPN back into my network?**
+Yes. Once deployed, the HTTPS endpoint from `neth deploy` is reachable from anywhere, no VPN or port forwarding needed.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Do I still need a Nabu Casa subscription if I do this?**
+Only if you want the Alexa/Google Assistant integration that Nabu Casa bundles in. If you just want a URL to reach your HA instance remotely, this covers that on its own.
+
+**Is my Home Assistant instance protected if someone finds the URL?**
+During first setup, Nethera login protects the onboarding wizard. After you switch to `auth: none`, Home Assistant requires its own login. Anyone hitting the endpoint still has to authenticate through HA.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+- Normal use can rely on Home Assistant's own login after onboarding, but don't switch to `auth: none` until the admin account exists.
+- `network_mode: host` is required for local discovery features but means the container isn't network-isolated from the host.
+- `preferLan: true` is included because Home Assistant is usually LAN-first.
+- The config volume persists across redeploys, but it's not a backup, back it up separately if it matters.

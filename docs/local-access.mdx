@@ -1,0 +1,67 @@
+---
+title: Local access
+description: Prefer a LAN endpoint for apps that move large amounts of data.
+---
+
+`preferLan: true` asks Nethera to use the local network when it can.
+
+This is useful for photo backup, media apps, model downloads, and other workflows where moving traffic through the public edge would be slower or would count against bandwidth.
+
+```yaml
+services:
+  web:
+    image: ghcr.io/acme/app:latest
+    nethera:
+      public: 3000
+      preferLan: true
+```
+
+## What Nethera does
+
+When `preferLan` is enabled:
+
+- the agent also binds the public service to the machine's LAN address;
+- deploy output includes the LAN endpoint when the agent can determine one;
+- Nethera injects `NETHERA_LAN_HOST` and `NETHERA_LAN_URL` into the service when available;
+- the edge can redirect same-network browser requests to the LAN endpoint.
+
+Endpoint auth is checked before any LAN redirect. A login-protected endpoint still requires Nethera login first.
+
+## When redirects work
+
+Nethera compares the requester's public network with the public network observed by the machine agent.
+
+For IPv4, the address must match exactly.
+
+For IPv6, Nethera matches the same `/64` prefix.
+
+This means LAN redirect works best when the client device and the machine appear to Nethera through the same IP family. If the machine is observed over IPv6 and the browser reaches Nethera over IPv4, or the reverse, Nethera keeps using the normal public endpoint.
+
+## Multi-machine apps
+
+`preferLan` is not supported on shared load-balanced endpoints.
+
+For a multi-machine public service, use direct per-machine endpoints:
+
+```yaml
+services:
+  web:
+    image: ghcr.io/acme/app:latest
+    nethera:
+      public: 3000
+      perMachineEndpoints: true
+      preferLan: true
+```
+
+Each machine has its own public and LAN endpoint.
+
+## Mobile apps
+
+Some mobile apps cache a configured server URL or behave badly when redirected from a public HTTPS URL to a local HTTP URL.
+
+If the app has its own local-network URL setting, use the LAN endpoint printed by `neth deploy` there. For example, Immich has URL switching under **Settings -> Networking**.
+
+If a mobile app struggles with LAN redirects, either:
+
+- keep `preferLan: true` but configure the app with the printed LAN endpoint directly; or
+- set `preferLan: false` and use the public endpoint everywhere.

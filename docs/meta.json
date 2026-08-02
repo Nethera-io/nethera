@@ -1,0 +1,30 @@
+{
+  "pages": [
+    "index",
+    "quickstart",
+    "install-agent",
+    "deploy",
+    "core-concepts",
+    "nethera-yml",
+    "endpoints",
+    "resilient-deployments",
+    "auth",
+    "secrets",
+    "managed-files",
+    "file-transfer",
+    "init-containers",
+    "logs",
+    "architecture",
+    "usage",
+    "recipes",
+    "migrating-from-docker-compose",
+    "fleet-management",
+    "alerting",
+    "local-access",
+    "private-images",
+    "custom-domains",
+    "uninstalling-nethera",
+    "cli",
+    "troubleshooting"
+  ]
+}

@@ -1,0 +1,89 @@
+---
+
+title: Self-host vLLM with a public HTTPS endpoint
+description: Deploy vLLM as an OpenAI-compatible inference API on your own GPU machine, reachable over HTTPS with no static IP or port forwarding.
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+Deploys vLLM's OpenAI-compatible server on a machine you control and exposes it over HTTPS through Nethera, see [/docs](/docs) if you're new to Nethera.
+
+## Why run your own vLLM endpoint
+
+The alternative to this is usually one of two things: call a hosted inference API and pay per token within the models and serving options the provider offers, or run vLLM locally and leave it bound to localhost, which means nothing outside your machine, no other app, no teammate, no CI job, can call it. Getting past that second limit normally means building your own TLS termination, auth, and a way to reach a machine with no fixed address. This deploy skips that: you keep the model choice and the token-cost savings, and the endpoint is a normal HTTPS URL other services can call directly, with `auth: token` already gating access.
+
+## Requirements
+
+* Nethera CLI and a machine running the Nethera agent, see [/docs/quickstart](/docs/quickstart) if you haven't set this up.
+* A machine with a GPU and the NVIDIA Container Toolkit installed, the `deploy.resources.reservations.devices` block requires it.
+* A Hugging Face token if the model you point at is gated or private.
+
+## nethera.yml
+
+```yaml id="ach5vs"
+appName: vllm
+services:
+  api:
+    image: vllm/vllm-openai:latest
+    command: ["--model", "Qwen/Qwen3-0.6B"]
+    ipc: host
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]   # requires a GPU-capable machine and the NVIDIA Container Toolkit
+    nethera:
+      public: 8000                  # exposes container port 8000 as a public HTTPS endpoint
+      auth: token                   # requests must carry a Nethera endpoint token
+      secrets:
+        - HF_TOKEN                  # injected as an env var, used for gated/private HF models
+
+volumes:
+  hf-cache:
+```
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash id="d2k6hg"
+neth init
+neth secrets set HF_TOKEN
+neth deploy
+```
+
+Set `HF_TOKEN` if you plan to use gated or private Hugging Face models. For the public default model, you can set an empty or throwaway value if your Nethera deploy requires every declared secret to exist.
+
+## Use
+
+Call the HTTPS endpoint printed by `neth deploy` with a Nethera endpoint token. It's the standard vLLM OpenAI-compatible API, so any OpenAI client library works if you point it at this URL and set the token as the bearer credential.
+
+## Data and config notes
+
+* Model weights are cached in the `hf-cache` volume, so redeploys don't re-download unless you change the model.
+* Swapping models means editing the `command` line and redeploying, the cache volume will hold multiple models if you switch between them.
+* `HF_TOKEN` is only required if `Qwen/Qwen3-0.6B` is swapped for a gated or private model, the default here doesn't need one, but the field is left in so you're not blocked when you do change it.
+
+## Troubleshooting
+
+* **Deploy fails at the GPU reservation step**: the target machine doesn't have a GPU exposed to Docker, confirm the NVIDIA Container Toolkit is installed and `docker run --gpus all` works on that machine before deploying.
+* **First request hangs or times out**: the model is still downloading into `hf-cache`, check `neth logs` for download progress before assuming the deploy is broken.
+* **401 from Hugging Face during model download**: `HF_TOKEN` is missing or doesn't have read access to the model repo you specified.
+* **401 from the vLLM endpoint itself**: this is Nethera's `auth: token` check. If your OpenAI-compatible client sends `Authorization: Bearer <api_key>`, set that client API key to the Nethera endpoint token.
+
+## FAQ
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want a service that needs to receive inbound calls from outside your network. `auth: token` also gives you an API-friendly gate in front of the endpoint.
+
+**Can I redeploy or update this without SSHing into the machine?**
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several.
+
+**Does this require a specific GPU or can I run it on CPU?**
+The `nethera.yml` above reserves a GPU device, vLLM will not start without one on this config. There's no CPU fallback in this recipe, if you need CPU-only inference you'd have to remove the `deploy.resources` block and use a CPU-compatible vLLM build, which isn't covered here.
+
+## Notes
+
+* Changing the model in `command` doesn't clear old weights from `hf-cache`, delete the volume manually if you want to reclaim disk space.
+* `auth: token` protects the endpoint but doesn't rate-limit it, anyone with a valid token can call it as much as they want.
+* Nothing in this recipe configures request logging or usage metering, that's on you if you need it.

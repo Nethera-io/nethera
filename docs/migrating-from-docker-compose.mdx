@@ -1,0 +1,145 @@
+---
+title: Migrating from docker-compose.yml
+description: Move an existing Docker Compose app to Nethera without losing volumes, bind-mounted data, or config.
+---
+
+Already self-hosting something with Docker Compose? Nethera can take over running it and
+give it a public HTTPS endpoint. The part that needs care is your existing
+data: Compose names volumes after the project folder, and Nethera won't
+know your old volume names, or upload relative bind-mount directories,
+automatically.
+
+Read this before migrating anything with a database, uploads, media,
+notebooks, a model cache, or app config you'd rather not lose.
+
+**The short version:** your data survives the move as long as the top-level
+`name:` in `nethera.yml` matches your old Compose project name (or you pin
+the volume explicitly with `external: true`), and any relative bind mounts
+become absolute paths before you deploy.
+
+## 1. Find the current Compose project name
+
+Docker named volumes are usually named:
+
+```text
+<compose-project>_<volume-name>
+```
+
+Check the existing project name on the machine:
+
+```bash
+docker compose ls
+```
+
+If your app was started from `/opt/home-assistant/docker-compose.yml`, the project might be `home-assistant`. If it was started from another directory, it may be different.
+
+## 2. Make Nethera use the same Compose project name
+
+Keep `appName` as the human-readable Nethera app name. Add Compose's top-level `name:` field and set it to the old Compose project name. Nethera will let Compose use that project name instead of applying its generated `nethera_<appName>` project name.
+
+```yaml
+appName: home-assistant
+! name: '<project-name>'
+services:
+  web:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    volumes:
+      - home-assistant-config:/config
+    nethera:
+      public: 8123
+      auth: login
+volumes:
+  home-assistant-config:
+```
+
+Replace `<project-name>` with the existing Compose project name. For example, with `name: home-assistant`, the volume above resolves to `home-assistant_home-assistant-config`, matching the old project. If you omit `name:` or set it to a different value, Docker may create a new empty volume and the app may look like a fresh install.
+
+If you need to reuse a volume whose Docker name does not match that pattern, pin the volume explicitly:
+
+```yaml
+volumes:
+  home-assistant-config:
+    external: true
+    name: exact-existing-volume-name
+```
+
+## 3. Convert relative bind mounts
+
+Nethera deploys on the target machine. A relative path like `./data:/data` is ambiguous and not supported.
+
+If your existing Compose file has:
+
+```yaml
+services:
+  app:
+    volumes:
+      - ./data:/data
+```
+
+Convert it to an absolute path on the machine running the agent:
+
+```yaml
+services:
+  app:
+    volumes:
+      - /opt/my-app/data:/data
+```
+
+Use the real path where the data already exists on that machine. Do not use a path from your laptop unless your laptop is also the deployment target.
+
+## 4. Choose the right data path
+
+If the app already uses named volumes, keep the same top-level Compose `name:` and volume names.
+
+If the app already uses absolute bind mounts, keep those absolute paths.
+
+If the app uses relative bind mounts, replace them with absolute paths before deploying.
+
+If the app uses `env_file`, move sensitive values into Nethera app secrets and put non-secret values directly under `environment`.
+
+If the app uses `build: .`, build and push an image first, then reference it with `image:`.
+
+## 5. Import and review
+
+Run:
+
+```bash
+neth init
+```
+
+Choose to import the existing Compose file when prompted. Review the generated `nethera.yml` before deploying.
+
+Check specifically:
+
+- `appName` is the Nethera app name you want shown in the CLI and dashboard.
+- top-level Compose `name:` matches the old Compose project name if you want to reuse named volumes.
+- named volume names match the old Compose file.
+- bind mounts use absolute host paths.
+- no `build: .`, relative `env_file`, or relative directory mounts remain.
+- each public service has a `nethera:` block.
+
+## 6. Stop the old Compose project, then deploy
+
+Stop the old containers without deleting volumes:
+
+```bash
+docker compose stop
+```
+
+Do not run `docker compose down -v`; `-v` deletes named volumes.
+
+Then deploy from the project directory:
+
+```bash
+neth deploy
+```
+
+## If data does not appear
+
+Check the old volume name:
+
+```bash
+docker volume ls
+```
+
+If Docker created a new empty volume, the top-level Compose `name:` or volume name probably does not match the old Compose project. Fix `name:`, redeploy, and avoid deleting either volume until you have confirmed the app sees the expected data.

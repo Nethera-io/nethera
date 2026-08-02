@@ -1,0 +1,64 @@
+---
+title: Init containers
+description: Use one-shot Compose services to prepare volumes or configuration before your app starts.
+---
+
+Use an init service when something must happen before the main container starts.
+Common examples are preparing a named volume, creating directories, or fixing ownership for an image that runs as a non-root user.
+
+Nethera uses Docker Compose on the target machine, so this is just the Compose `depends_on` pattern:
+
+```yaml
+services:
+  init:
+    image: busybox:1.36
+    restart: "no"
+    command: sh -c "chown -R 1024:1024 /data"
+    volumes:
+      - app-data:/data
+
+  web:
+    image: ghcr.io/acme/app:latest
+    volumes:
+      - app-data:/data
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    nethera:
+      public: 3000
+      auth: login
+
+volumes:
+  app-data:
+```
+
+The `restart: "no"` line matters. Setup containers are expected to exit after their command completes. Long-running app services should normally keep the default restart behavior.
+
+## When to use this
+
+Use an init service for work that must finish before the app starts:
+
+- changing ownership or permissions on named volumes;
+- creating required directories;
+- copying small default files into a fresh volume;
+- one-time setup that is safe to run again.
+
+Keep init commands idempotent. A redeploy may run them again.
+
+## When to use post-deploy commands
+
+Use `nethera.postDeploy` when the main container must already be running before the command can work.
+
+Examples:
+
+- downloading a model through the app container;
+- installing plugins after the app has started;
+- calling a local admin command inside the service container.
+
+`nethera.postDeploy` runs after Compose starts the service. An init service runs before another service is allowed to start.
+
+## What not to put here
+
+Do not use init services for secrets, source uploads, large data transfers, or long-running background processes.
+
+Use Nethera secrets for sensitive values. Use named volumes for persistent app data.

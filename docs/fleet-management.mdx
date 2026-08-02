@@ -1,0 +1,67 @@
+---
+title: Fleet management
+description: Pair multiple machines and target deployments across your Nethera fleet.
+---
+
+Every paired machine belongs to your workspace and appears in the CLI and dashboard.
+
+```bash
+neth machine list
+```
+
+## Choose deployment targets
+
+Use `neth machine select` to choose which paired machines an app should deploy to:
+
+```bash
+neth machine select
+neth deploy
+```
+
+This updates the `targets:` list in `nethera.yml`. Target changes are desired state, so Nethera will add new targets and remove old targets on the next deploy after confirmation.
+
+## Deploy from nethera.yml targets
+
+`neth init` asks which paired machines should be deployment targets for the app. Those targets are stored in `nethera.yml`.
+
+Use this when an app should consistently deploy to the same machine or set of machines.
+
+When the same public service targets multiple machines on Pro, Nethera can give it one shared endpoint and distribute requests round-robin across reachable service instances.
+
+Plus supports two machines, but not shared load-balanced endpoints. For multi-machine public services on Plus, set `perMachineEndpoints: true` so each machine gets its own endpoint.
+
+<Callout type="warning">
+  Multi-machine deploys with writable named volumes or host bind mounts can diverge. Nethera routes traffic between machines, but it does not replicate databases, uploads, model caches, or other local state.
+</Callout>
+
+## Logs across machines
+
+Multi-machine apps may produce more than one log stream:
+
+```bash
+neth logs
+neth logs --machine home-gpu
+```
+
+When multiple machines or services are involved, the CLI can prefix lines by machine and service.
+
+## Management on and off
+
+Machines can stay registered while management is disabled.
+
+```bash
+neth machine enable home-gpu
+neth machine disable home-gpu
+```
+
+Management enabled means Nethera can deploy, route traffic, stream logs, and manage the machine. Management disabled means the machine remains in your workspace, but Nethera does not manage it and it does not count toward the active managed machine limit.
+
+Disabling management never stops local containers, deletes deployments, removes volumes, or uninstalls the agent.
+
+## Removing machines
+
+Machine removal is a safe workflow. Removing a machine from Nethera disables its public endpoints and stops future control-plane management. Local containers are not stopped unless explicit cleanup is requested.
+
+```bash
+neth machine deregister home-gpu
+```

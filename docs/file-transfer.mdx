@@ -1,0 +1,52 @@
+---
+title: File transfer
+description: Copy files and inspect directories on paired machines.
+---
+
+Use `neth copy` when you need to move files between your development machine and a paired Nethera machine, when they are on the same local network.
+
+This is useful for model files, media libraries, exports, backups, or other data that should live on the target machine rather than inside `nethera.yml`.
+
+## Copy to a machine
+
+```bash
+neth copy ./model.safetensors home-gpu:/mnt/nethera/comfyui/models/checkpoints/
+```
+
+You can copy files or directories. The destination uses:
+
+```text
+<machine-name>:<absolute-path-on-machine>
+```
+
+Use an absolute path on the target machine. For app data, paths under `/mnt/nethera/...` are usually easiest to keep track of.
+
+## Copy from a machine
+
+```bash
+neth copy home-gpu:/mnt/nethera/comfyui/output ./output
+```
+
+If the source is a directory, Nethera copies the directory contents into the local destination you choose.
+
+## List files
+
+Use `neth ls` to inspect a machine path before copying:
+
+```bash
+neth ls home-gpu:/mnt/nethera/comfyui/models
+```
+
+The listing is intentionally bounded so large directories do not flood your terminal.
+
+## How it works
+
+The backend coordinates the session, then the CLI and agent transfer data over the local network. You do not need to open SSH or expose an extra port.
+
+The agent must be online for copy and list commands to work.
+
+## When to use managed files instead
+
+Use [managed files](/docs/managed-files) for small text config files that should be part of a deployment snapshot.
+
+Use `neth copy` for larger local data, model files, generated files, directories, or anything you want to move manually before or after deployment.

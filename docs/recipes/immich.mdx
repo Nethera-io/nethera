@@ -1,0 +1,156 @@
+---
+
+title: Self-host Immich with a public URL
+description: Deploy Immich to a machine you control and get a public HTTPS endpoint, so mobile backups can work from outside your home network.
+-----------------------------------------------------------------------------------------------------------------------------------------------
+
+This recipe deploys Immich, a self-hosted photo and video backup app, to a machine you control and exposes it over public HTTPS via Nethera. See [/docs](/docs) for the full introduction to how that works.
+
+## Why Immich
+
+The usual alternative to this is Google Photos or iCloud, both of which already work from anywhere by default, that's the whole point of them. Self-hosting closes the gap on ownership and storage control, but only if your phone can actually reach the server when you're not on your home wifi.
+
+Immich's mobile app can back up selected photo albums to the server, including background backup where the phone OS allows it. That is most useful when the server is reachable from wherever your phone is, not only when you're back home on the same LAN.
+
+Normally that's the part that makes self-hosted Immich annoying: to get backups working away from home, you'd otherwise set up port forwarding, a dynamic DNS hack, or a VPN like Tailscale just to give your phone a path back to the server. Nethera's public endpoint is that path, so the deploy gets you the ownership and storage benefits of self-hosting without also taking on the networking project that usually comes with it.
+
+<Callout type="info">
+  Already running Immich with Compose? If you deploy without matching your old volume names, Nethera may create empty volumes instead of reusing your existing data. Read [Migrating from docker-compose.yml](/docs/migrating-from-docker-compose) first.
+</Callout>
+
+## Requirements
+
+* Nethera CLI (`neth`) installed
+* A machine running the Nethera agent
+
+See [/docs/quickstart](/docs/quickstart) for setup of both.
+
+## nethera.yml
+
+```yaml
+appName: immich
+services:
+  server:
+    image: ghcr.io/immich-app/immich-server:release
+    environment:
+      DB_HOSTNAME: db
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE_NAME: immich
+      REDIS_HOSTNAME: redis
+    volumes:
+      - immich-upload:/data
+    depends_on:
+      - db
+      - redis
+    nethera:
+      public: 2283       # exposes this service's port 2283 over the public HTTPS endpoint
+      auth: login         # protects first admin setup behind Nethera login
+      preferLan: true     # redirects same-network traffic to the local address when possible
+
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:release
+    volumes:
+      - immich-model-cache:/cache
+
+  redis:
+    image: valkey/valkey:9
+
+  db:
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: --data-checksums
+    volumes:
+      - immich-db:/var/lib/postgresql/data
+
+volumes:
+  immich-upload:
+  immich-model-cache:
+  immich-db:
+```
+
+Only `server` has a `nethera:` block, so it's the only service reachable from outside the machine. `immich-machine-learning`, `redis`, and `db` stay internal to the Compose network.
+
+## Deploy
+
+Save the config above as `nethera.yml` in a new project directory, then from that directory run:
+
+```bash
+neth init
+neth deploy
+```
+
+`neth init` prepares the Nethera metadata for the app, including the generated app identifier and target machine selection.
+
+## Open
+
+Open the HTTPS endpoint printed by `neth deploy`. Nethera will require login before Immich loads. Create the first Immich admin account before sharing the URL or connecting mobile devices.
+
+## Lock down normal use
+
+After the admin account exists, change the service's Nethera auth to `none` if you want Immich's own login and mobile app flow to be the only access layer:
+
+```yaml
+nethera:
+  public: 2283
+  auth: none
+  preferLan: true
+```
+
+Then redeploy:
+
+```bash
+neth deploy
+```
+
+<Callout type="info">
+  Recommended: in the Immich mobile app, open Settings -> Networking and configure URL switching. Use the Nethera HTTPS endpoint as the external URL, and use the LAN endpoint printed by `neth deploy` as the local URL. This lets Immich choose the local path while you are home without relying on automatic redirects during uploads.
+</Callout>
+
+## Data and config notes
+
+* Photos, videos, thumbnails, encoded video, and Immich's automatic database dump backups live under the `/data` mount, backed here by the `immich-upload` volume. Back up or snapshot this volume the same way you would any other persistent data.
+* For a real restore plan, also back up the Postgres data in `immich-db`. The uploaded files and the database need to be preserved together.
+* `immich-machine-learning` uses `immich-model-cache` to store its downloaded models. This powers machine-learning features such as face recognition and smart search.
+* Database credentials (`POSTGRES_PASSWORD`, `DB_PASSWORD`, etc.) are set to `postgres` in this file. Change them before deploying if this is anything other than a throwaway test.
+* Start with `auth: login` for first admin creation. Switch to `auth: none` only after the Immich admin account exists.
+* `preferLan: true` prints a LAN endpoint on deploy when Nethera can detect it. For Immich mobile, use Settings -> Networking URL switching with the public Nethera URL and the printed LAN URL.
+
+## Troubleshooting
+
+**Face detection or smart search isn't working right after deploy.** `immich-machine-learning` downloads its models into `immich-model-cache` on first run. This takes time depending on the machine's bandwidth; features that depend on it won't be available until the download finishes.
+
+**Uploads are slow or failing on a large library.** Check available disk space on the host for the `immich-upload` volume. Photo libraries grow fast and there's nothing in this config that caps volume size.
+
+**Mobile app won't connect or backup.** Confirm the app is pointed at the HTTPS URL from `neth deploy`, not a local IP or hostname. A local address only works while the phone is on the same network as the machine.
+
+**Background backup isn't immediate.** Immich can run mobile backups in the background, but the phone's operating system still controls when background work is allowed to run. Battery optimization, low power mode, and iOS or Android background scheduling can all affect when uploads happen.
+
+## FAQ
+
+**Will Immich back up my phone's photos automatically when I'm not on my home wifi?**
+Yes, as long as the mobile app is pointed at the public HTTPS endpoint rather than a local address, and you have enabled cellular backup in app settings. That endpoint is what lets the phone reach the server over cellular or any other network.
+
+**Why not just use a VPN, like Tailscale or WireGuard?**
+
+A VPN works well if it's just you, or a small group who already have a client installed. Nethera's endpoint is a normal HTTPS link instead, useful once you want to share access without asking someone to install anything. `auth: login` still gates who's let through if you want that.
+
+**Why self-host Immich instead of just paying for Google Photos or iCloud?**
+Mainly ownership and control over where the library lives. Storage capacity is bounded by the disk you attach to the machine, rather than by a cloud photo plan, though you are still responsible for hardware, backups, and any Nethera subscription.
+
+**Is my Immich instance password protected, or can anyone who finds the URL get in?**
+During first setup, Nethera login protects admin creation. After you switch to `auth: none`, Immich has its own account/login system, so the URL alone doesn't grant access, but anyone with the URL can reach the login screen.
+
+**Can I redeploy or update this without SSHing into the machine?**
+
+Yes, `neth deploy` from your project directory redeploys in place. If you're managing more than one machine, the same command and `nethera.yml` work whether you're targeting one or several, see [fleet management](/docs/fleet-management) for pairing multiple machines under one workspace.
+
+## Notes
+
+* Normal use can rely on Immich's login, but don't switch to `auth: none` until the first admin account exists.
+* Only `server` is publicly reachable; `db`, `redis`, and `immich-machine-learning` are not exposed and don't need to be.
+* Postgres only applies `POSTGRES_PASSWORD` on first initialization of the volume. Changing it later in the YAML won't rotate the password on an existing `immich-db` volume.
+* Storage is bounded by the disk on the machine running the agent, not by anything in this config.
