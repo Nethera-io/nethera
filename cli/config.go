@@ -43,6 +43,19 @@ func normalizeEnvironmentName(value string) string {
 	return value
 }
 
+var promptInputReader = bufio.NewReader(os.Stdin)
+
+func readPromptInputLine() (string, error) {
+	value, err := promptInputReader.ReadString('\n')
+	if err != nil {
+		if err == io.EOF && value != "" {
+			return strings.TrimSpace(value), nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(value), nil
+}
+
 func currentEnvironmentName() string {
 	cfg, err := loadAuthConfig(defaultAuthConfigPath())
 	if err == nil && strings.TrimSpace(cfg.CurrentEnvironment) != "" {
@@ -194,14 +207,13 @@ func promptYesNo(question string) (bool, error) {
 }
 
 func promptYesNoDefaultNo(question string) (bool, error) {
-	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Printf("%s [y/N]: ", question)
-		answer, err := reader.ReadString('\n')
+		answer, err := readPromptInputLine()
 		if err != nil {
 			return false, err
 		}
-		trimmed := strings.ToLower(strings.TrimSpace(answer))
+		trimmed := strings.ToLower(answer)
 		switch trimmed {
 		case "", "n", "no":
 			return false, nil
@@ -215,12 +227,7 @@ func promptYesNoDefaultNo(question string) (bool, error) {
 
 func promptLine(prompt string) (string, error) {
 	fmt.Print(prompt)
-	reader := bufio.NewReader(os.Stdin)
-	value, err := reader.ReadString('\n')
-	if err != nil && err != io.EOF {
-		return "", err
-	}
-	return strings.TrimSpace(value), nil
+	return readPromptInputLine()
 }
 
 func promptSecretValue(prompt string) (string, error) {
