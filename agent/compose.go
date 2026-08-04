@@ -277,11 +277,8 @@ func applyPublicEndpoint(serviceName, appName, deploymentID string, serviceNode,
 			return publicEndpointReport{}, fmt.Errorf("service %s nethera.preferLan requires a detected LAN address", serviceName)
 		}
 		lanPort = targetPort
-		if lanPort <= 0 || !localTCPPortAvailable(lanHost, lanPort) || usedLANPorts[lanPort] {
-			lanPort = allocatePublicPort(usedLANPorts)
-		}
-		if lanPort <= 0 {
-			return publicEndpointReport{}, fmt.Errorf("unable to allocate a LAN endpoint port for service %s", serviceName)
+		if usedLANPorts[lanPort] {
+			return publicEndpointReport{}, fmt.Errorf("service %s nethera.preferLan cannot bind LAN port %d because another service in this deployment already uses it", serviceName, lanPort)
 		}
 		usedLANPorts[lanPort] = true
 	}

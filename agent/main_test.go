@@ -1188,7 +1188,7 @@ func TestApplyPublicEndpointWithPreferLAN(t *testing.T) {
 	}
 }
 
-func TestApplyPublicEndpointWithPreferLANSkipsOccupiedTargetPort(t *testing.T) {
+func TestApplyPublicEndpointWithPreferLANKeepsTargetPortWhenAlreadyBound(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -1205,8 +1205,8 @@ func TestApplyPublicEndpointWithPreferLANSkipsOccupiedTargetPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply public endpoint: %v", err)
 	}
-	if route.LANPort == targetPort || route.LANPort != publicHostPortStart {
-		t.Fatalf("expected occupied target port to be skipped, got route %#v", route)
+	if route.LANPort != targetPort {
+		t.Fatalf("expected LAN endpoint to keep target port across redeploys, got route %#v", route)
 	}
 }
 
