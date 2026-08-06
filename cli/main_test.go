@@ -233,6 +233,43 @@ func TestDeployEndpointLANURL(t *testing.T) {
 	}
 }
 
+func TestSyncPlanOnlyIncludesMissingOrChangedEntries(t *testing.T) {
+	now := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
+	source := map[string]syncEntry{
+		"album":       {Path: "album", IsDir: true, ModTime: now},
+		"album/a.mp3": {Path: "album/a.mp3", Size: 100, ModTime: now},
+		"album/b.mp3": {Path: "album/b.mp3", Size: 200, ModTime: now},
+		"album/c.mp3": {Path: "album/c.mp3", Size: 300, ModTime: now},
+	}
+	dest := map[string]syncEntry{
+		"album":       {Path: "album", IsDir: true, ModTime: now},
+		"album/a.mp3": {Path: "album/a.mp3", Size: 100, ModTime: now},
+		"album/b.mp3": {Path: "album/b.mp3", Size: 201, ModTime: now},
+	}
+	plan := syncPlan(source, dest)
+	got := []string{}
+	for _, entry := range plan {
+		got = append(got, entry.Path)
+	}
+	want := []string{"album/b.mp3", "album/c.mp3"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("syncPlan paths = %#v, want %#v", got, want)
+	}
+}
+
+func TestSyncEntryChangedAllowsSmallMtimeDrift(t *testing.T) {
+	now := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
+	source := syncEntry{Path: "track.flac", Size: 1000, ModTime: now}
+	dest := syncEntry{Path: "track.flac", Size: 1000, ModTime: now.Add(500 * time.Millisecond)}
+	if syncEntryChanged(source, dest) {
+		t.Fatalf("expected small mtime drift with same size to be treated as unchanged")
+	}
+	dest.ModTime = now.Add(2 * time.Second)
+	if !syncEntryChanged(source, dest) {
+		t.Fatalf("expected large mtime drift to be treated as changed")
+	}
+}
+
 func TestRequestMachinePairingOmitsRegionWhenNotExplicit(t *testing.T) {
 	var body map[string]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

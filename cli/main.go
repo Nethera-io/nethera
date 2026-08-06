@@ -53,6 +53,8 @@ func main() {
 		runLogs(os.Args[2:])
 	case "copy":
 		runCopy(os.Args[2:])
+	case "sync":
+		runSync(os.Args[2:])
 	case "ls":
 		runRemoteLS(os.Args[2:])
 	case "secrets":

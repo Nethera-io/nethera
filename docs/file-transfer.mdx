@@ -1,9 +1,9 @@
 ---
 title: File transfer
-description: Copy files and inspect directories on paired machines.
+description: Copy, sync, and inspect directories on paired machines.
 ---
 
-Use `neth copy` when you need to move files between your development machine and a paired Nethera machine, when they are on the same local network.
+Use `neth copy` or `neth sync` when you need to move files between your development machine and a paired Nethera machine, when they are on the same local network.
 
 This is useful for model files, media libraries, exports, backups, or other data that should live on the target machine rather than inside `nethera.yml`.
 
@@ -29,6 +29,28 @@ neth copy home-gpu:/mnt/nethera/comfyui/output ./output
 
 If the source is a directory, Nethera copies the directory contents into the local destination you choose.
 
+## Sync a directory
+
+Use `neth sync` when you want to update a directory without copying unchanged files again:
+
+```bash
+neth sync ./music home-server:/mnt/nethera/navidrome/music
+```
+
+You can also sync from a machine back to your local filesystem:
+
+```bash
+neth sync home-server:/mnt/nethera/navidrome/music ./music
+```
+
+`neth sync` compares file size and modification time. It copies new or changed files and creates missing directories. It does not delete destination files.
+
+Preview a sync without copying files:
+
+```bash
+neth sync --dry-run ./music home-server:/mnt/nethera/navidrome/music
+```
+
 ## List files
 
 Use `neth ls` to inspect a machine path before copying:
@@ -43,10 +65,10 @@ The listing is intentionally bounded so large directories do not flood your term
 
 The backend coordinates the session, then the CLI and agent transfer data over the local network. You do not need to open SSH or expose an extra port.
 
-The agent must be online for copy and list commands to work.
+The agent must be online for copy, sync, and list commands to work.
 
 ## When to use managed files instead
 
 Use [managed files](/docs/managed-files) for small text config files that should be part of a deployment snapshot.
 
-Use `neth copy` for larger local data, model files, generated files, directories, or anything you want to move manually before or after deployment.
+Use `neth copy` or `neth sync` for larger local data, model files, generated files, directories, or anything you want to move manually before or after deployment.

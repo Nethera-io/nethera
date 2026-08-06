@@ -40,6 +40,7 @@ type copyFrame struct {
 	Path        string          `json:"path,omitempty"`
 	Size        int64           `json:"size,omitempty"`
 	IsDir       bool            `json:"isDir,omitempty"`
+	ModTime     string          `json:"modifiedAt,omitempty"`
 	Entries     []copyListEntry `json:"entries,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	Truncated   bool            `json:"truncated,omitempty"`
@@ -133,6 +134,10 @@ func runCopySession(ctx context.Context, backendURL, machineToken string, sessio
 		err = sendDownload(stream, remotePath)
 	case "list":
 		err = sendList(stream, remotePath)
+	case "sync-list":
+		err = sendSyncList(stream, remotePath)
+	case "sync-download":
+		err = sendDownloadSelected(stream, remotePath, session.Manifest)
 	default:
 		err = fmt.Errorf("unsupported copy operation %s", session.Operation)
 	}
@@ -243,6 +248,7 @@ func receiveUpload(stream io.ReadWriter, remotePath string) error {
 				_ = os.Remove(tmp)
 				return err
 			}
+			applyCopyModTime(target, frame.ModTime)
 		case "end":
 			return nil
 		default:
@@ -272,7 +278,7 @@ func sendDownload(stream io.ReadWriter, remotePath string) error {
 		if err != nil {
 			return err
 		}
-		frame := copyFrame{Type: "entry", Path: rel, IsDir: entry.IsDir(), Size: info.Size()}
+		frame := copyFrame{Type: "entry", Path: rel, IsDir: entry.IsDir(), Size: info.Size(), ModTime: info.ModTime().UTC().Format(time.RFC3339Nano)}
 		if err := writeCopyFrame(stream, frame); err != nil {
 			return err
 		}
@@ -292,12 +298,117 @@ func sendDownload(stream io.ReadWriter, remotePath string) error {
 	})
 }
 
+func sendDownloadSelected(stream io.ReadWriter, remotePath string, manifest map[string]any) error {
+	paths := manifestPathSet(manifest)
+	if len(paths) == 0 {
+		return nil
+	}
+	for rel := range paths {
+		target, err := safeJoinRemote(remotePath, rel)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(target)
+		if err != nil {
+			return err
+		}
+		frame := copyFrame{Type: "entry", Path: filepath.ToSlash(filepath.Clean(rel)), IsDir: info.IsDir(), Size: info.Size(), ModTime: info.ModTime().UTC().Format(time.RFC3339Nano)}
+		if err := writeCopyFrame(stream, frame); err != nil {
+			return err
+		}
+		if info.IsDir() {
+			continue
+		}
+		file, err := os.Open(target)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(stream, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
+}
+
+func manifestPathSet(manifest map[string]any) map[string]bool {
+	out := map[string]bool{}
+	raw, ok := manifest["paths"]
+	if !ok {
+		return out
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return out
+	}
+	for _, item := range items {
+		path := filepath.ToSlash(filepath.Clean(strings.TrimSpace(fmt.Sprint(item))))
+		if path == "." || path == "" || strings.HasPrefix(path, "../") || path == ".." || strings.Contains(path, "\x00") {
+			continue
+		}
+		out[path] = true
+	}
+	return out
+}
+
+func applyCopyModTime(path string, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil {
+		return
+	}
+	_ = os.Chtimes(path, parsed, parsed)
+}
+
 func sendList(stream io.ReadWriter, remotePath string) error {
 	entries, truncated, more, err := buildCopyList(remotePath)
 	if err != nil {
 		return err
 	}
 	return writeCopyFrame(stream, copyFrame{Type: "list", RemotePath: remotePath, Entries: entries, Truncated: truncated, MoreEntries: more})
+}
+
+func sendSyncList(stream io.ReadWriter, remotePath string) error {
+	info, err := os.Stat(remotePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("sync path must be a directory")
+	}
+	return filepath.WalkDir(remotePath, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == remotePath {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(remotePath, path)
+		if err != nil {
+			return err
+		}
+		frame := copyFrame{
+			Type:    "entry",
+			Path:    filepath.ToSlash(rel),
+			IsDir:   entry.IsDir(),
+			Size:    info.Size(),
+			ModTime: info.ModTime().UTC().Format(time.RFC3339Nano),
+		}
+		return writeCopyFrame(stream, frame)
+	})
 }
 
 func buildCopyList(remotePath string) ([]copyListEntry, bool, int, error) {

@@ -211,6 +211,13 @@ var commandHelpEntries = []commandHelpEntry{
 		Description: "Copies files or directories between your local machine and a paired Nethera machine using the agent-coordinated copy channel.",
 	},
 	{
+		Command:     "sync",
+		Summary:     "Sync a directory to or from a machine.",
+		Usage:       "neth sync <local-dir> <machine>:/mnt/nethera/... | neth sync <machine>:/mnt/nethera/... <local-dir>",
+		Description: "Synchronizes new or changed files between a local directory and a paired Nethera machine. It compares size and modification time, and does not delete destination files.",
+		Examples:    []string{"neth sync ./music homebox:/mnt/nethera/navidrome/music", "neth sync --dry-run homebox:/mnt/nethera/navidrome/music ./music"},
+	},
+	{
 		Command:     "ls",
 		Summary:     "List files on a machine.",
 		Usage:       "neth ls <machine>:/mnt/nethera/...",
@@ -329,7 +336,7 @@ func renderCLIReferenceMDX() string {
 		{Title: "Secrets", Commands: []string{"secrets", "secrets set", "secrets list", "secrets reveal", "secrets delete"}},
 		{Title: "Machines", Commands: []string{"machine", "machine list", "machine stats", "machine pair", "machine select", "machine enable", "machine disable", "machine deregister"}},
 		{Title: "Usage", Commands: []string{"usage"}},
-		{Title: "File Transfer", Commands: []string{"copy", "ls"}},
+		{Title: "File Transfer", Commands: []string{"copy", "sync", "ls"}},
 	}
 	for _, section := range sections {
 		builder.WriteString("## " + section.Title + "\n\n")

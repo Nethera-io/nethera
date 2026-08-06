@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ type copyFrame struct {
 	Path        string          `json:"path,omitempty"`
 	Size        int64           `json:"size,omitempty"`
 	IsDir       bool            `json:"isDir,omitempty"`
+	ModTime     string          `json:"modifiedAt,omitempty"`
 	Entries     []copyListEntry `json:"entries,omitempty"`
 	Error       string          `json:"error,omitempty"`
 	Truncated   bool            `json:"truncated,omitempty"`
@@ -53,6 +55,13 @@ type copyListEntry struct {
 	Children  []copyListEntry `json:"children,omitempty"`
 	Truncated bool            `json:"truncated,omitempty"`
 	Error     string          `json:"error,omitempty"`
+}
+
+type syncEntry struct {
+	Path    string
+	Size    int64
+	IsDir   bool
+	ModTime time.Time
 }
 
 func runCopy(args []string) {
@@ -86,6 +95,43 @@ func runCopy(args []string) {
 	if leftRemote {
 		if err := runCopyDownload(*backendURL, token, leftSpec, fs.Arg(1), *force); err != nil {
 			fmt.Printf("copy failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+}
+
+func runSync(args []string) {
+	fs := flag.NewFlagSet("sync", flag.ExitOnError)
+	backendURL := fs.String("backend", defaultBackendURL(), "backend base URL")
+	dryRun := fs.Bool("dry-run", false, "show what would change without copying files")
+	fs.Parse(args)
+	if fs.NArg() != 2 {
+		fmt.Println("usage: neth sync <local-dir> <machine>:/mnt/nethera/...")
+		fmt.Println("       neth sync <machine>:/mnt/nethera/... <local-dir>")
+		os.Exit(1)
+	}
+	leftRemote, leftSpec := parseRemoteSpec(fs.Arg(0))
+	rightRemote, rightSpec := parseRemoteSpec(fs.Arg(1))
+	if leftRemote == rightRemote {
+		fmt.Println("sync must be local-to-machine or machine-to-local")
+		os.Exit(1)
+	}
+	token, err := loadAuthToken(*backendURL)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	if rightRemote {
+		if err := runSyncUpload(*backendURL, token, fs.Arg(0), rightSpec, *dryRun); err != nil {
+			fmt.Printf("sync failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if leftRemote {
+		if err := runSyncDownload(*backendURL, token, leftSpec, fs.Arg(1), *dryRun); err != nil {
+			fmt.Printf("sync failed: %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -208,6 +254,136 @@ func runCopyDownload(backendURL, token string, remote remoteSpec, localPath stri
 	}
 	fmt.Printf("Copying from %s:%s\n", remote.Machine, remote.Path)
 	return receiveDownload(stream, localPath, force)
+}
+
+func runSyncUpload(backendURL, token, localPath string, remote remoteSpec, dryRun bool) error {
+	localPath = filepath.Clean(localPath)
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("sync source must be a directory")
+	}
+	fmt.Printf("Preparing sync to %s...\n", remote.Machine)
+	localEntries, err := buildSyncLocalManifest(localPath)
+	if err != nil {
+		return err
+	}
+	remoteEntries, err := fetchRemoteSyncManifest(backendURL, token, remote)
+	if err != nil {
+		return err
+	}
+	plan := syncPlan(localEntries, remoteEntries)
+	printSyncPlan(plan, "upload", dryRun)
+	if dryRun || len(plan) == 0 {
+		return nil
+	}
+	session, sessionToken, err := createCopySession(backendURL, token, remote.Machine, "upload", remote.Path, nil)
+	if err != nil {
+		return err
+	}
+	session, err = waitForCopySessionReady(backendURL, token, session.ID)
+	if err != nil {
+		return err
+	}
+	stream, closeFn, err := openCopyStream(session, sessionToken)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	if err := copyHandshake(stream, session, sessionToken); err != nil {
+		return err
+	}
+	fmt.Printf("Syncing to %s:%s\n", remote.Machine, remote.Path)
+	return sendUploadPlan(stream, localPath, plan)
+}
+
+func runSyncDownload(backendURL, token string, remote remoteSpec, localPath string, dryRun bool) error {
+	localPath = filepath.Clean(localPath)
+	fmt.Printf("Preparing sync from %s...\n", remote.Machine)
+	remoteEntries, err := fetchRemoteSyncManifest(backendURL, token, remote)
+	if err != nil {
+		return err
+	}
+	localEntries := map[string]syncEntry{}
+	if info, err := os.Stat(localPath); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("sync destination must be a directory")
+		}
+		localEntries, err = buildSyncLocalManifest(localPath)
+		if err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	plan := syncPlan(remoteEntries, localEntries)
+	printSyncPlan(plan, "download", dryRun)
+	if dryRun || len(plan) == 0 {
+		return nil
+	}
+	paths := make([]any, 0, len(plan))
+	for _, entry := range plan {
+		paths = append(paths, entry.Path)
+	}
+	session, sessionToken, err := createCopySession(backendURL, token, remote.Machine, "sync-download", remote.Path, map[string]any{"paths": paths})
+	if err != nil {
+		return err
+	}
+	session, err = waitForCopySessionReady(backendURL, token, session.ID)
+	if err != nil {
+		return err
+	}
+	stream, closeFn, err := openCopyStream(session, sessionToken)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	if err := copyHandshake(stream, session, sessionToken); err != nil {
+		return err
+	}
+	fmt.Printf("Syncing from %s:%s\n", remote.Machine, remote.Path)
+	return receiveDownloadPlan(stream, localPath)
+}
+
+func fetchRemoteSyncManifest(backendURL, token string, remote remoteSpec) (map[string]syncEntry, error) {
+	session, sessionToken, err := createCopySession(backendURL, token, remote.Machine, "sync-list", remote.Path, nil)
+	if err != nil {
+		return nil, err
+	}
+	session, err = waitForCopySessionReady(backendURL, token, session.ID)
+	if err != nil {
+		return nil, err
+	}
+	stream, closeFn, err := openCopyStream(session, sessionToken)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+	if err := copyHandshake(stream, session, sessionToken); err != nil {
+		return nil, err
+	}
+	entries := map[string]syncEntry{}
+	for {
+		frame, err := readCopyFrame(stream)
+		if err != nil {
+			return nil, err
+		}
+		switch frame.Type {
+		case "entry":
+			entry := syncEntryFromFrame(frame)
+			if entry.Path != "" {
+				entries[entry.Path] = entry
+			}
+		case "done":
+			return entries, nil
+		case "error":
+			return nil, fmt.Errorf(frame.Error)
+		default:
+			return nil, fmt.Errorf("unexpected sync-list frame %s", frame.Type)
+		}
+	}
 }
 
 func createCopySession(backendURL, token, machine, operation, remotePath string, manifest map[string]any) (copySessionInfo, string, error) {
@@ -336,6 +512,100 @@ func buildLocalManifest(localPath string, info os.FileInfo) ([]map[string]any, e
 	return entries, err
 }
 
+func buildSyncLocalManifest(localPath string) (map[string]syncEntry, error) {
+	entries := map[string]syncEntry{}
+	err := filepath.WalkDir(localPath, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == localPath {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(localPath, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		entries[rel] = syncEntry{Path: rel, Size: info.Size(), IsDir: entry.IsDir(), ModTime: info.ModTime().UTC()}
+		return nil
+	})
+	return entries, err
+}
+
+func syncEntryFromFrame(frame copyFrame) syncEntry {
+	modTime := time.Time{}
+	if strings.TrimSpace(frame.ModTime) != "" {
+		modTime, _ = time.Parse(time.RFC3339Nano, strings.TrimSpace(frame.ModTime))
+	}
+	path := filepath.ToSlash(filepath.Clean(strings.TrimSpace(frame.Path)))
+	if path == "." || strings.HasPrefix(path, "../") || path == ".." {
+		path = ""
+	}
+	return syncEntry{Path: path, Size: frame.Size, IsDir: frame.IsDir, ModTime: modTime.UTC()}
+}
+
+func syncPlan(source, dest map[string]syncEntry) []syncEntry {
+	planned := []syncEntry{}
+	for path, sourceEntry := range source {
+		destEntry, ok := dest[path]
+		if !ok || syncEntryChanged(sourceEntry, destEntry) {
+			planned = append(planned, sourceEntry)
+		}
+	}
+	sortSyncEntries(planned)
+	return planned
+}
+
+func syncEntryChanged(source, dest syncEntry) bool {
+	if source.IsDir || dest.IsDir {
+		return source.IsDir != dest.IsDir
+	}
+	if source.Size != dest.Size {
+		return true
+	}
+	if source.ModTime.IsZero() || dest.ModTime.IsZero() {
+		return false
+	}
+	diff := source.ModTime.Sub(dest.ModTime)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff > time.Second
+}
+
+func sortSyncEntries(entries []syncEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir != entries[j].IsDir {
+			return entries[i].IsDir
+		}
+		return entries[i].Path < entries[j].Path
+	})
+}
+
+func printSyncPlan(plan []syncEntry, direction string, dryRun bool) {
+	dirCount := 0
+	fileCount := 0
+	var bytes int64
+	for _, entry := range plan {
+		if entry.IsDir {
+			dirCount++
+		} else {
+			fileCount++
+			bytes += entry.Size
+		}
+	}
+	fmt.Println("Sync plan:")
+	fmt.Printf("  %d director%s to create/update\n", dirCount, pluralY(dirCount))
+	fmt.Printf("  %d file%s to %s (%s)\n", fileCount, pluralS(fileCount), direction, copyFormatBytes(bytes))
+	if dryRun {
+		fmt.Println("Dry run; no files copied.")
+	}
+}
+
 func sendUpload(stream io.ReadWriter, localPath string, info os.FileInfo) error {
 	base := filepath.Dir(localPath)
 	if info.IsDir() {
@@ -353,7 +623,7 @@ func sendUpload(stream io.ReadWriter, localPath string, info os.FileInfo) error 
 		if err != nil {
 			return err
 		}
-		frame := copyFrame{Type: "entry", Path: filepath.ToSlash(rel), Size: info.Size(), IsDir: entry.IsDir()}
+		frame := copyFrame{Type: "entry", Path: filepath.ToSlash(rel), Size: info.Size(), IsDir: entry.IsDir(), ModTime: info.ModTime().UTC().Format(time.RFC3339Nano)}
 		if err := writeCopyFrame(stream, frame); err != nil {
 			return err
 		}
@@ -373,6 +643,36 @@ func sendUpload(stream io.ReadWriter, localPath string, info os.FileInfo) error 
 		return closeErr
 	}); err != nil {
 		return err
+	}
+	if err := writeCopyFrame(stream, copyFrame{Type: "end"}); err != nil {
+		return err
+	}
+	return expectCopyDone(stream)
+}
+
+func sendUploadPlan(stream io.ReadWriter, localRoot string, plan []syncEntry) error {
+	for _, entry := range plan {
+		frame := copyFrame{Type: "entry", Path: entry.Path, Size: entry.Size, IsDir: entry.IsDir, ModTime: entry.ModTime.UTC().Format(time.RFC3339Nano)}
+		if err := writeCopyFrame(stream, frame); err != nil {
+			return err
+		}
+		if entry.IsDir {
+			continue
+		}
+		path := filepath.Join(localRoot, filepath.FromSlash(entry.Path))
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("  %s (%s)\n", entry.Path, copyFormatBytes(entry.Size))
+		_, copyErr := io.Copy(stream, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
 	}
 	if err := writeCopyFrame(stream, copyFrame{Type: "end"}); err != nil {
 		return err
@@ -438,6 +738,7 @@ func receiveDownload(stream io.ReadWriter, localPath string, force bool) error {
 				_ = os.Remove(tmp)
 				return err
 			}
+			applyLocalCopyModTime(target, frame.ModTime)
 		case "done":
 			return nil
 		case "error":
@@ -446,6 +747,86 @@ func receiveDownload(stream io.ReadWriter, localPath string, force bool) error {
 			return fmt.Errorf("unexpected copy frame %s", frame.Type)
 		}
 	}
+}
+
+func receiveDownloadPlan(stream io.ReadWriter, localRoot string) error {
+	if err := os.MkdirAll(localRoot, 0o755); err != nil {
+		return err
+	}
+	for {
+		frame, err := readCopyFrame(stream)
+		if err != nil {
+			return err
+		}
+		switch frame.Type {
+		case "entry":
+			target := filepath.Clean(filepath.Join(localRoot, filepath.FromSlash(frame.Path)))
+			if !strings.HasPrefix(target, filepath.Clean(localRoot)+string(os.PathSeparator)) && target != filepath.Clean(localRoot) {
+				return fmt.Errorf("download path escapes destination: %s", frame.Path)
+			}
+			if frame.IsDir {
+				if err := os.MkdirAll(target, 0o755); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			tmp := target + ".nethera-tmp"
+			file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("  %s (%s)\n", frame.Path, copyFormatBytes(frame.Size))
+			_, copyErr := io.CopyN(file, stream, frame.Size)
+			closeErr := file.Close()
+			if copyErr != nil {
+				_ = os.Remove(tmp)
+				return copyErr
+			}
+			if closeErr != nil {
+				_ = os.Remove(tmp)
+				return closeErr
+			}
+			if err := os.Rename(tmp, target); err != nil {
+				_ = os.Remove(tmp)
+				return err
+			}
+			applyLocalCopyModTime(target, frame.ModTime)
+		case "done":
+			return nil
+		case "error":
+			return fmt.Errorf(frame.Error)
+		default:
+			return fmt.Errorf("unexpected sync-download frame %s", frame.Type)
+		}
+	}
+}
+
+func applyLocalCopyModTime(path string, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil {
+		return
+	}
+	_ = os.Chtimes(path, parsed, parsed)
+}
+
+func pluralS(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func pluralY(count int) string {
+	if count == 1 {
+		return "y"
+	}
+	return "ies"
 }
 
 func expectCopyDone(stream io.Reader) error {

@@ -331,6 +331,22 @@ neth copy <machine>:/mnt/nethera/... <local-path>
 
 Copies files or directories between your local machine and a paired Nethera machine using the agent-coordinated copy channel.
 
+### `neth sync`
+
+```bash
+neth sync <local-dir> <machine>:/mnt/nethera/...
+neth sync <machine>:/mnt/nethera/... <local-dir>
+```
+
+Synchronizes new or changed files between a local directory and a paired Nethera machine. It compares size and modification time, and does not delete destination files.
+
+Examples:
+
+```bash
+neth sync ./music homebox:/mnt/nethera/navidrome/music
+neth sync --dry-run homebox:/mnt/nethera/navidrome/music ./music
+```
+
 ### `neth ls`
 
 ```bash
