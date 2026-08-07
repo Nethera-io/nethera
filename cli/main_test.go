@@ -257,16 +257,20 @@ func TestSyncPlanOnlyIncludesMissingOrChangedEntries(t *testing.T) {
 	}
 }
 
-func TestSyncEntryChangedAllowsSmallMtimeDrift(t *testing.T) {
+func TestSyncEntryChangedOnlyTreatsSameSizeNewerSourceAsChanged(t *testing.T) {
 	now := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	source := syncEntry{Path: "track.flac", Size: 1000, ModTime: now}
 	dest := syncEntry{Path: "track.flac", Size: 1000, ModTime: now.Add(500 * time.Millisecond)}
 	if syncEntryChanged(source, dest) {
 		t.Fatalf("expected small mtime drift with same size to be treated as unchanged")
 	}
-	dest.ModTime = now.Add(2 * time.Second)
+	dest.ModTime = now.Add(-2 * time.Second)
 	if !syncEntryChanged(source, dest) {
-		t.Fatalf("expected large mtime drift to be treated as changed")
+		t.Fatalf("expected newer source with same size to be treated as changed")
+	}
+	dest.ModTime = now.Add(2 * time.Second)
+	if syncEntryChanged(source, dest) {
+		t.Fatalf("expected newer destination with same size to be treated as unchanged")
 	}
 }
 

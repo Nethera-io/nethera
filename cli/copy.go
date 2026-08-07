@@ -570,11 +570,7 @@ func syncEntryChanged(source, dest syncEntry) bool {
 	if source.ModTime.IsZero() || dest.ModTime.IsZero() {
 		return false
 	}
-	diff := source.ModTime.Sub(dest.ModTime)
-	if diff < 0 {
-		diff = -diff
-	}
-	return diff > time.Second
+	return source.ModTime.After(dest.ModTime.Add(time.Second))
 }
 
 func sortSyncEntries(entries []syncEntry) {
