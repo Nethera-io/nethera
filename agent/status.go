@@ -95,11 +95,17 @@ func reconcileLocalDeployments(machineWireGuardIP string) ([]string, error) {
 			continue
 		}
 		commandArgs := composeCommandArgs(projectName, useProjectFlag, metadata.GeneratedComposePath, "up", "-d", "--remove-orphans")
-		cmd := exec.Command(dockerBin, commandArgs...)
+		reconcileCtx, cancelReconcile := context.WithTimeout(context.Background(), localDeploymentReconcileCommandTimeout())
+		cmd := exec.CommandContext(reconcileCtx, dockerBin, commandArgs...)
 		cmd.Env = statusCommandEnv()
-		output, err := cmd.CombinedOutput()
+		output, err := runCommandStreaming(cmd, nil)
+		cancelReconcile()
 		logs = append(logs, fmt.Sprintf("reconcile running: %s %s", dockerBin, strings.Join(commandArgs, " ")))
 		logs = append(logs, formatCommandOutput(output)...)
+		if reconcileCtx.Err() == context.DeadlineExceeded {
+			logs = append(logs, fmt.Sprintf("reconcile failed for %s: docker compose timed out", metadata.DeploymentID))
+			continue
+		}
 		if err != nil {
 			logs = append(logs, fmt.Sprintf("reconcile failed for %s: %v", metadata.DeploymentID, err))
 			continue
@@ -110,6 +116,14 @@ func reconcileLocalDeployments(machineWireGuardIP string) ([]string, error) {
 	}
 	_ = machineWireGuardIP
 	return logs, nil
+}
+
+func localDeploymentReconcileCommandTimeout() time.Duration {
+	seconds := agentLogStreamEnvInt("DEPLOY_RECONCILE_TIMEOUT_SECONDS", 900)
+	if seconds < 30 {
+		seconds = 30
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func inspectDeploymentStatus(dockerBin, projectName string, expectedServices []string) string {

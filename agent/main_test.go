@@ -1454,6 +1454,19 @@ func TestRunCommandStreamingCapturesAndEmitsOutput(t *testing.T) {
 	}
 }
 
+func TestRunCommandStreamingCapsCapturedOutput(t *testing.T) {
+	output, err := runCommandStreaming(exec.CommandContext(context.Background(), "sh", "-c", "yes 0123456789 | head -n 40000"), nil)
+	if err != nil {
+		t.Fatalf("run streaming command: %v", err)
+	}
+	if len(output) > commandCaptureMaxOutputBytes {
+		t.Fatalf("captured output is not capped: %d > %d", len(output), commandCaptureMaxOutputBytes)
+	}
+	if !strings.Contains(string(output), "0123456789") {
+		t.Fatalf("expected capped output to retain command output")
+	}
+}
+
 func TestFormatCommandOutputSplitsDockerProgressCarriageReturns(t *testing.T) {
 	lines := formatCommandOutput([]byte("layer Downloading [> ] 1MB/2MB\rlayer Downloading [=>] 2MB/2MB\nlocal error: tls: bad record MAC"))
 	want := []string{

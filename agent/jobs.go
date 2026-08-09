@@ -25,6 +25,7 @@ const (
 	postDeployCommandTimeout      = 30 * time.Minute
 	postDeployMaxOutputLines      = 80
 	postDeployMaxOutputLineLength = 500
+	commandCaptureMaxOutputBytes  = 256 * 1024
 )
 
 func mergeLANEndpointEnv(generatedEnv map[string]string, endpoints []publicEndpointReport) map[string]string {
@@ -106,7 +107,7 @@ type liveCommandWriter struct {
 func (w liveCommandWriter) Write(data []byte) (int, error) {
 	w.capture.mu.Lock()
 	defer w.capture.mu.Unlock()
-	_, _ = w.capture.output.Write(data)
+	w.capture.writeOutput(data)
 	pending := w.capture.pending[w.stream] + string(data)
 	for {
 		index := strings.IndexAny(pending, "\r\n")
@@ -115,7 +116,7 @@ func (w liveCommandWriter) Write(data []byte) (int, error) {
 		}
 		line := strings.TrimSpace(pending[:index])
 		pending = strings.TrimLeft(pending[index+1:], "\r\n")
-		if line != "" {
+		if line != "" && w.capture.sink != nil {
 			w.capture.sink(w.stream, line)
 		}
 	}
@@ -123,7 +124,22 @@ func (w liveCommandWriter) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
+func (capture *liveCommandCapture) writeOutput(data []byte) {
+	if len(data) >= commandCaptureMaxOutputBytes {
+		capture.output.Reset()
+		_, _ = capture.output.Write(data[len(data)-commandCaptureMaxOutputBytes:])
+		return
+	}
+	if excess := capture.output.Len() + len(data) - commandCaptureMaxOutputBytes; excess > 0 {
+		_ = capture.output.Next(excess)
+	}
+	_, _ = capture.output.Write(data)
+}
+
 func (capture *liveCommandCapture) flush() {
+	if capture.sink == nil {
+		return
+	}
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
 	for stream, pending := range capture.pending {
@@ -143,9 +159,6 @@ func runCommandStreaming(cmd *exec.Cmd, sink deployLogSink) ([]byte, error) {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = time.Second
-	if sink == nil {
-		return cmd.CombinedOutput()
-	}
 	capture := &liveCommandCapture{pending: map[string]string{}, sink: sink}
 	cmd.Stdout = liveCommandWriter{capture: capture, stream: "stdout"}
 	cmd.Stderr = liveCommandWriter{capture: capture, stream: "stderr"}
@@ -833,11 +846,16 @@ func cleanupManagedDeployments() ([]string, error) {
 		}
 		if hasContainers {
 			commandArgs := composeCommandArgs(projectName, useProjectFlag, metadata.GeneratedComposePath, "down", "--remove-orphans")
-			cmd := exec.Command(dockerBin, commandArgs...)
+			cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), localDeploymentReconcileCommandTimeout())
+			cmd := exec.CommandContext(cleanupCtx, dockerBin, commandArgs...)
 			cmd.Env = os.Environ()
-			output, err := cmd.CombinedOutput()
+			output, err := runCommandStreaming(cmd, nil)
+			cancelCleanup()
 			logs = append(logs, fmt.Sprintf("cleanup running: %s %s", dockerBin, strings.Join(commandArgs, " ")))
 			logs = append(logs, formatCommandOutput(output)...)
+			if cleanupCtx.Err() == context.DeadlineExceeded {
+				return logs, fmt.Errorf("docker compose cleanup timed out")
+			}
 			if err != nil {
 				if exitErr, ok := err.(*exec.ExitError); ok {
 					logs = append(logs, fmt.Sprintf("docker compose exit code: %d", exitErr.ExitCode()))
@@ -879,8 +897,13 @@ func countContainersByFilters(dockerBin string, filters []string) (int, error) {
 		args = append(args, "--filter", filter)
 	}
 	args = append(args, "--format", "{{.ID}}")
-	cmd := exec.Command(dockerBin, args...)
-	output, err := cmd.CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, dockerBin, args...)
+	output, err := runCommandStreaming(cmd, nil)
+	if ctx.Err() == context.DeadlineExceeded {
+		return 0, ctx.Err()
+	}
 	if err != nil {
 		return 0, fmt.Errorf("docker ps failed: %w: %s", err, summarizeBody(output))
 	}
