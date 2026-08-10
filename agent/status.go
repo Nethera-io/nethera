@@ -688,7 +688,9 @@ func dockerAPIEndpointFromEnv() (dockerAPIEndpoint, error) {
 }
 
 func dockerHTTPClient(timeout time.Duration, endpoint dockerAPIEndpoint) *http.Client {
-	transport := &http.Transport{}
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+	}
 	if endpoint.socketPath != "" {
 		socketPath := endpoint.socketPath
 		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -705,6 +707,9 @@ func dockerAPIGet(timeout time.Duration, path string) ([]byte, error) {
 		return nil, err
 	}
 	client := dockerHTTPClient(timeout, endpoint)
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		defer transport.CloseIdleConnections()
+	}
 	response, err := client.Get(endpoint.baseURL + path)
 	if err != nil {
 		return nil, err
